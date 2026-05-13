@@ -34,4 +34,4 @@ Then visit `http://localhost:8000`.
 
 ## License
 
-MIT (this repo). The upstream jobhive dataset is also MIT-licensed.
+MIT (this repo). Built on top of [ats-scrapers](https://github.com/kalil0321/ats-scrapers), which is also MIT-licensed. The upstream jobhive dataset is MIT-licensed.
