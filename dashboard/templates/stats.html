@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+
+{% block title %}Stats{% endblock %}
+
+{% block body_attrs %}x-data="statsPage()" x-init="init()"{% endblock %}
+
+{% block head %}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script defer src="{{ url_for('static', path='js/stats.js') }}"></script>
+{% endblock %}
+
+{% block main %}
+<div class="space-y-8">
+
+  {# ===== Header + country selector ===== #}
+  <header class="flex flex-wrap items-end justify-between gap-3">
+    <div class="space-y-1">
+      <h1 class="text-3xl font-semibold tracking-tight">Stats</h1>
+      <p class="text-text-muted text-sm">
+        Snapshot of the rolling 30-day window
+        <span class="text-text-subtle" x-show="summary?.last_sync">
+          · refreshed
+          <span x-text="new Date(summary.last_sync).toLocaleString()"></span>
+        </span>
+      </p>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <label for="country-select" class="text-sm text-text-muted">Country</label>
+      <select id="country-select" class="input select py-1.5 pr-8 pl-3 text-sm w-auto"
+              :value="country" @change="setCountry($event.target.value)">
+        <template x-for="row in byCountry" :key="row.label">
+          <option :value="row.label" x-text="row.label + ' (' + row.count.toLocaleString() + ')'"></option>
+        </template>
+      </select>
+    </div>
+  </header>
+
+  {# ===== Error / loading ===== #}
+  <div x-show="error" class="toast">
+    <div class="flex items-start gap-3">
+      <svg class="h-4 w-4 text-danger shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01" stroke-linecap="round"/></svg>
+      <div class="flex-1 text-sm">Couldn't load stats · <span x-text="error" class="text-text-muted"></span></div>
+      <button class="btn btn-secondary btn-sm" @click="fetchAll()">Retry</button>
+    </div>
+  </div>
+
+  {# ===== Bootstrap warning ===== #}
+  <div x-show="summary && summary.undated > 0"
+       class="card p-3 text-sm text-text-muted flex items-start gap-2">
+    <svg class="h-4 w-4 text-info shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01" stroke-linecap="round"/></svg>
+    <p>
+      <span class="text-text font-medium tabular" x-text="summary?.undated.toLocaleString()"></span>
+      of <span class="tabular" x-text="summary?.total_jobs.toLocaleString()"></span>
+      jobs come from upstream sources without a `posted_at` field
+      (Workday, FAANG via custom APIs, etc.). They use <em>first observed</em>
+      as the time anchor — today's "Jobs per day" spike is the day-0 bootstrap
+      and will spread naturally over the next 30 days.
+    </p>
+  </div>
+
+  {# ===== Summary cards ===== #}
+  <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <template x-for="card in [
+      { label: 'Total jobs',    value: summary?.total_jobs },
+      { label: 'Dated rows',    value: summary?.dated },
+      { label: 'USA · last 24h', value: summary?.us_24h },
+      { label: 'USA · last 7d',  value: summary?.us_7d },
+      { label: 'USA · last 30d', value: summary?.us_30d },
+      { label: 'Remote',         value: summary?.remote },
+      { label: 'ATS sources',    value: summary?.ats_count },
+      { label: 'Companies',      value: summary?.company_count },
+    ]" :key="card.label">
+      <div class="card p-4 space-y-1">
+        <p class="text-xs uppercase tracking-wider text-text-subtle" x-text="card.label"></p>
+        <p class="stat-number text-2xl font-semibold tabular"
+           x-text="(card.value ?? 0).toLocaleString()"></p>
+      </div>
+    </template>
+  </section>
+
+  {# ===== Two-up: Jobs by ATS + Remote vs On-site ===== #}
+  <section class="grid lg:grid-cols-3 gap-6">
+    <div class="card p-5 lg:col-span-2 space-y-3">
+      <header class="flex items-baseline justify-between">
+        <h2 class="font-semibold">Jobs by ATS source</h2>
+        <p class="text-xs text-text-subtle">top 15 · last 30d · global</p>
+      </header>
+      <div class="relative h-[420px]">
+        <canvas id="chart-by-ats"></canvas>
+      </div>
+    </div>
+
+    <div class="card p-5 space-y-3">
+      <header class="flex items-baseline justify-between">
+        <h2 class="font-semibold">Remote vs on-site</h2>
+        <p class="text-xs text-text-subtle"><span x-text="country"></span> · last 30d</p>
+      </header>
+      <div class="relative h-[420px]">
+        <canvas id="chart-remote"></canvas>
+      </div>
+    </div>
+  </section>
+
+  {# ===== Jobs per day (line) ===== #}
+  <section class="card p-5 space-y-3">
+    <header class="flex items-baseline justify-between">
+      <h2 class="font-semibold">Jobs per day</h2>
+      <p class="text-xs text-text-subtle">
+        <span x-text="country"></span> · last 30 days · by effective date
+      </p>
+    </header>
+    <div class="relative h-[280px]">
+      <canvas id="chart-by-day"></canvas>
+    </div>
+  </section>
+
+  {# ===== Salary distribution ===== #}
+  <section class="card p-5 space-y-3">
+    <header class="flex items-baseline justify-between">
+      <h2 class="font-semibold">Salary distribution</h2>
+      <p class="text-xs text-text-subtle">
+        <span x-text="country"></span> · last 30d · annual USD only
+      </p>
+    </header>
+    <div class="relative h-[260px]">
+      <canvas id="chart-salary"></canvas>
+    </div>
+    <div class="grid grid-cols-3 gap-3 pt-2 border-t border-border-base">
+      <div class="text-sm">
+        <p class="text-xs uppercase tracking-wider text-text-subtle">25th percentile</p>
+        <p class="font-mono tabular text-text" x-text="fmtSalary(salaryRange?.p25)"></p>
+      </div>
+      <div class="text-sm">
+        <p class="text-xs uppercase tracking-wider text-text-subtle">Median</p>
+        <p class="font-mono tabular text-text" x-text="fmtSalary(salaryRange?.median)"></p>
+      </div>
+      <div class="text-sm">
+        <p class="text-xs uppercase tracking-wider text-text-subtle">75th percentile</p>
+        <p class="font-mono tabular text-text" x-text="fmtSalary(salaryRange?.p75)"></p>
+      </div>
+    </div>
+  </section>
+
+  {# ===== Two tables: top companies + by country ===== #}
+  <section class="grid lg:grid-cols-2 gap-6">
+
+    <div class="card p-5 space-y-3">
+      <header class="flex items-baseline justify-between">
+        <h2 class="font-semibold">Top hiring companies</h2>
+        <p class="text-xs text-text-subtle">
+          <span x-text="country"></span> · last 7d · top 20
+        </p>
+      </header>
+      <table class="w-full text-sm">
+        <tbody>
+          <template x-for="(row, i) in topCompanies" :key="row.label">
+            <tr class="border-b border-border-base last:border-0">
+              <td class="py-2 text-text-subtle text-xs tabular pr-2 w-6" x-text="i + 1"></td>
+              <td class="py-2 truncate">
+                <a :href="'/?country=US&company=' + encodeURIComponent(row.label)"
+                   class="text-text hover:underline underline-offset-2"
+                   x-text="row.label"></a>
+              </td>
+              <td class="py-2 text-right font-mono tabular text-text-muted"
+                  x-text="row.count.toLocaleString()"></td>
+            </tr>
+          </template>
+          <tr x-show="!topCompanies.length && !isLoading">
+            <td colspan="3" class="py-6 text-center text-text-subtle">No data</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card p-5 space-y-3">
+      <header class="flex items-baseline justify-between">
+        <h2 class="font-semibold">Jobs by country</h2>
+        <p class="text-xs text-text-subtle">last 30d · top 20</p>
+      </header>
+      <table class="w-full text-sm">
+        <tbody>
+          <template x-for="(row, i) in byCountry" :key="row.label">
+            <tr class="border-b border-border-base last:border-0 cursor-pointer hover:bg-surface-muted"
+                @click="setCountry(row.label)">
+              <td class="py-2 text-text-subtle text-xs tabular pr-2 w-6" x-text="i + 1"></td>
+              <td class="py-2 truncate">
+                <span class="text-text" x-text="row.label"></span>
+                <span x-show="row.label === country" class="badge badge-accent ml-2">selected</span>
+              </td>
+              <td class="py-2 text-right font-mono tabular text-text-muted"
+                  x-text="row.count.toLocaleString()"></td>
+            </tr>
+          </template>
+          <tr x-show="!byCountry.length && !isLoading">
+            <td colspan="3" class="py-6 text-center text-text-subtle">No data</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+{% endblock %}

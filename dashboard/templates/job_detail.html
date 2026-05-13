@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% from "_components/macros.html" import button, badge %}
+
+{% block title %}{{ job.title or "Job" }} · {{ job.company or "" }}{% endblock %}
+
+{# Tiny per-page Alpine scope just for the save toggle. #}
+{% block body_attrs %}x-data="jobDetail({ id: {{ job.id }}, isSaved: {{ 'true' if job.is_saved else 'false' }} })"{% endblock %}
+
+{% block head %}
+  <script>
+    // Inline — small enough not to deserve its own .js file.
+    function jobDetail(initial) {
+      return {
+        jobId: initial.id,
+        isSaved: initial.isSaved,
+        async toggleSave() {
+          const was = this.isSaved;
+          this.isSaved = !was;
+          try {
+            const r = await fetch(`/api/saved/${this.jobId}`, { method: was ? "DELETE" : "POST" });
+            if (!r.ok) throw new Error();
+          } catch {
+            this.isSaved = was;
+          }
+        },
+      };
+    }
+  </script>
+{% endblock %}
+
+{% block main %}
+<div class="space-y-4 lg:pb-0 pb-24">
+
+  {# Breadcrumb #}
+  <nav class="text-sm">
+    <a href="/" class="text-text-muted hover:text-text inline-flex items-center gap-1">
+      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+      All jobs
+    </a>
+  </nav>
+
+  <div class="grid lg:grid-cols-[1fr_320px] gap-6 items-start">
+
+    {# ===== Main column ============================================== #}
+    <article class="space-y-6 min-w-0">
+
+      <header class="space-y-3">
+        <h1 class="text-3xl font-semibold tracking-tight text-balance">
+          {{ job.title or "Untitled" }}
+        </h1>
+        <p class="text-lg text-text-muted">
+          {{ job.company or "Unknown company" }}
+        </p>
+
+        <div class="flex flex-wrap items-center gap-2 text-sm text-text-muted">
+          {% if job.location %}
+            <span>{{ job.location }}</span>
+          {% endif %}
+          {% if job.is_remote %}
+            <span class="badge badge-success">Remote</span>
+          {% endif %}
+          {% if job.ats_type %}
+            <span class="badge">{{ job.ats_type }}</span>
+          {% endif %}
+          {% if job.employment_type %}
+            <span class="badge">{{ job.employment_type }}</span>
+          {% endif %}
+          {% if job.country %}
+            <span class="badge">{{ job.country }}</span>
+          {% endif %}
+        </div>
+      </header>
+
+      {# Description — plain text from ingest (HTML already stripped, so XSS-safe).
+         pre-wrap preserves the paragraph breaks we wrote at ingest time. #}
+      <div class="card p-6 lg:p-8">
+        {% if job.description %}
+          <div class="text-text leading-relaxed whitespace-pre-wrap text-pretty">{{ job.description }}</div>
+        {% else %}
+          <p class="text-text-subtle italic">No description provided by the upstream source.</p>
+        {% endif %}
+      </div>
+
+      {# Footer meta (mobile shows here too; desktop has it in the sidebar) #}
+      <div class="lg:hidden grid grid-cols-2 gap-3 text-sm">
+        {% if job.salary_summary or job.salary_min_usd_annual or job.salary_max_usd_annual %}
+          <div class="card p-3">
+            <p class="text-xs uppercase tracking-wider text-text-subtle">Salary</p>
+            <p class="font-mono tabular text-text">
+              {%- if job.salary_min_usd_annual or job.salary_max_usd_annual -%}
+                {%- set lo = job.salary_min_usd_annual -%}
+                {%- set hi = job.salary_max_usd_annual -%}
+                {%- if lo and hi and lo != hi -%}
+                  ${{ "{:,.0f}".format(lo) }}–${{ "{:,.0f}".format(hi) }}
+                {%- elif hi or lo -%}
+                  ${{ "{:,.0f}".format(hi or lo) }}
+                {%- endif %} USD/yr
+              {%- elif job.salary_summary -%}
+                {{ job.salary_summary }}
+              {%- endif -%}
+            </p>
+          </div>
+        {% endif %}
+        <div class="card p-3">
+          <p class="text-xs uppercase tracking-wider text-text-subtle">
+            {{ "Posted" if job.is_dated else "First seen" }}
+          </p>
+          <p class="text-text">{{ time_label }}</p>
+        </div>
+      </div>
+    </article>
+
+    {# ===== Right sidebar (desktop) ================================ #}
+    <aside class="hidden lg:block">
+      <div class="sticky top-20 space-y-4">
+
+        {# Apply card #}
+        <div class="card card-elevated p-5 space-y-4">
+          <a href="{{ job.apply_url or job.url }}" target="_blank" rel="noopener"
+             class="btn btn-primary btn-lg w-full justify-center">
+            Apply on {{ job.ats_type or "site" }}
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M7 7h10v10"/></svg>
+          </a>
+
+          <button type="button"
+                  class="btn btn-secondary w-full justify-center"
+                  @click="toggleSave()"
+                  :class="{ 'border-accent text-accent': isSaved }">
+            <template x-if="!isSaved">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+            </template>
+            <template x-if="isSaved">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+            </template>
+            <span x-text="isSaved ? 'Saved for MS2' : 'Save for MS2'"></span>
+          </button>
+        </div>
+
+        {# Meta card #}
+        <div class="card p-5 space-y-3 text-sm">
+          {% if job.salary_min_usd_annual or job.salary_max_usd_annual %}
+            <div>
+              <p class="text-xs uppercase tracking-wider text-text-subtle">Salary</p>
+              <p class="font-mono tabular text-text">
+                {%- set lo = job.salary_min_usd_annual -%}
+                {%- set hi = job.salary_max_usd_annual -%}
+                {%- if lo and hi and lo != hi -%}
+                  ${{ "{:,.0f}".format(lo) }} – ${{ "{:,.0f}".format(hi) }}
+                {%- elif hi or lo -%}
+                  ${{ "{:,.0f}".format(hi or lo) }}
+                {%- endif %} <span class="text-text-subtle">/yr</span>
+              </p>
+            </div>
+          {% elif job.salary_summary %}
+            <div>
+              <p class="text-xs uppercase tracking-wider text-text-subtle">Salary</p>
+              <p class="text-text">{{ job.salary_summary }}</p>
+            </div>
+          {% endif %}
+
+          {% if job.department %}
+            <div>
+              <p class="text-xs uppercase tracking-wider text-text-subtle">Department</p>
+              <p class="text-text">{{ job.department }}</p>
+            </div>
+          {% endif %}
+
+          {% if job.team %}
+            <div>
+              <p class="text-xs uppercase tracking-wider text-text-subtle">Team</p>
+              <p class="text-text">{{ job.team }}</p>
+            </div>
+          {% endif %}
+
+          {% if job.requisition_id %}
+            <div>
+              <p class="text-xs uppercase tracking-wider text-text-subtle">Requisition ID</p>
+              <p class="text-text font-mono text-xs">{{ job.requisition_id }}</p>
+            </div>
+          {% endif %}
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-text-subtle">
+              {{ "Posted" if job.is_dated else "First seen" }}
+            </p>
+            <p class="text-text">{{ time_label }}</p>
+          </div>
+
+          {% if job.fetched_cycle %}
+            <div>
+              <p class="text-xs uppercase tracking-wider text-text-subtle">Last refresh</p>
+              <p class="text-text-subtle text-xs">{{ job.fetched_cycle }}</p>
+            </div>
+          {% endif %}
+
+          <div class="pt-2 border-t border-border-base">
+            <a href="{{ job.url }}" target="_blank" rel="noopener"
+               class="text-xs text-text-subtle hover:text-text underline-offset-2 hover:underline break-all">
+              Source URL ↗
+            </a>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  {# ===== Mobile sticky bottom bar =============================== #}
+  <div class="lg:hidden fixed bottom-0 left-0 right-0 z-30 border-t border-border-base bg-bg/95 backdrop-blur-md">
+    <div class="mx-auto max-w-screen-2xl px-4 py-3 flex items-center gap-2">
+      <button type="button"
+              class="btn btn-secondary btn-icon shrink-0"
+              @click="toggleSave()"
+              :class="{ 'border-accent text-accent': isSaved }"
+              :aria-label="isSaved ? 'Unsave' : 'Save'">
+        <template x-if="!isSaved">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+        </template>
+        <template x-if="isSaved">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+        </template>
+      </button>
+      <a href="{{ job.apply_url or job.url }}" target="_blank" rel="noopener"
+         class="btn btn-primary btn-lg flex-1 justify-center">
+        Apply on {{ job.ats_type or "site" }}
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M7 7h10v10"/></svg>
+      </a>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,202 @@
+"""GET /api/jobs — paginated list + search, /{id}, /facets, /companies."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, HTTPException, Query
+
+from app.config import settings
+from app.database import get_db
+from app.schemas import (
+    CompaniesResponse,
+    CompanyHit,
+    FacetCount,
+    FacetGroup,
+    FacetsResponse,
+    JobDetail,
+    JobSummary,
+    JobsListResponse,
+)
+from app.services import query as q
+
+router = APIRouter()
+
+# Map UI-friendly sort keys to the underlying SORT_CLAUSES keys.
+SORT_ALIASES = {
+    "newest": "newest",
+    "oldest": "oldest",
+    "salary_high": "salary_high",
+    "salary_low": "salary_low",
+    "relevance": "relevance",
+    # Legacy/alternate names
+    "posted_at_desc": "newest",
+    "posted_at_asc": "oldest",
+}
+
+
+def _saved_ids_for(conn, job_ids: list[int]) -> set[int]:
+    if not job_ids:
+        return set()
+    ph = ",".join(["?"] * len(job_ids))
+    rows = conn.execute(
+        f"SELECT job_id FROM saved_jobs WHERE job_id IN ({ph})", job_ids
+    ).fetchall()
+    return {r["job_id"] for r in rows}
+
+
+@router.get("/", response_model=JobsListResponse)
+def list_jobs(
+    q_: Annotated[str | None, Query(alias="q", description="Full-text search across title/company/description/location")] = None,
+    country: Annotated[list[str] | None, Query(description="Country code (e.g. US). Repeatable.")] = None,
+    ats: Annotated[list[str] | None, Query(description="ATS type (e.g. greenhouse). Repeatable.")] = None,
+    remote: bool | None = None,
+    employment_type: Annotated[list[str] | None, Query()] = None,
+    department: Annotated[list[str] | None, Query()] = None,
+    salary_min_usd: Annotated[int | None, Query(ge=0, description="Minimum annual USD salary")] = None,
+    posted_hours: Annotated[int, Query(ge=0, le=720, description="Effective-date window in hours; 0 = no time filter (max 720h = 30d, matches storage)")] = 24,
+    include_undated: Annotated[bool, Query(description="Include rows where upstream posted_at is NULL (uses first_seen_at fallback)")] = True,
+    company: Annotated[str | None, Query(description="Exact company match (use for drilldown from /companies)")] = None,
+    sort: Annotated[str, Query(description="newest | oldest | salary_high | salary_low | relevance")] = "newest",
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> JobsListResponse:
+    """List jobs with filters. Defaults to USA · last 24h · newest first."""
+    limit = min(limit, settings.max_page_size)
+    sort_key = SORT_ALIASES.get(sort, "newest")
+
+    f = q.JobFilters(
+        q=q_,
+        country=tuple(country or ()),
+        ats=tuple(ats or ()),
+        remote=remote,
+        employment_type=tuple(employment_type or ()),
+        department=tuple(department or ()),
+        salary_min_usd=salary_min_usd,
+        posted_hours=posted_hours,
+        include_undated=include_undated,
+        company=company,
+    )
+
+    offset = (page - 1) * limit
+    sql, params = q.build_jobs_select(f, sort=sort_key, limit=limit, offset=offset)
+    count_sql, count_params = q.build_count(f)
+
+    with get_db() as conn:
+        rows = conn.execute(sql, params).fetchall()
+        total = conn.execute(count_sql, count_params).fetchone()[0]
+        saved_ids = _saved_ids_for(conn, [r["id"] for r in rows])
+
+    jobs = [q.row_to_summary(r, saved_ids) for r in rows]
+    return JobsListResponse(
+        jobs=[JobSummary(**j) for j in jobs],
+        page=page,
+        limit=limit,
+        total=total,
+        has_more=(page * limit) < total,
+        sort=sort_key,
+    )
+
+
+@router.get("/facets", response_model=FacetsResponse)
+def facets(
+    q_: Annotated[str | None, Query(alias="q")] = None,
+    country: Annotated[list[str] | None, Query()] = None,
+    ats: Annotated[list[str] | None, Query()] = None,
+    remote: bool | None = None,
+    employment_type: Annotated[list[str] | None, Query()] = None,
+    department: Annotated[list[str] | None, Query()] = None,
+    salary_min_usd: Annotated[int | None, Query(ge=0)] = None,
+    posted_hours: Annotated[int, Query(ge=0, le=720)] = 24,
+    include_undated: bool = True,
+    company: str | None = None,
+    facets_: Annotated[list[str] | None, Query(alias="facets", description="Which facet groups to compute")] = None,
+    limit_per_facet: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> FacetsResponse:
+    """Faceted counts for the filter sidebar. Each group is computed by
+    applying ALL OTHER active filters but ignoring its own — so users see
+    "if I checked this, how many would I get" counts."""
+    f = q.JobFilters(
+        q=q_,
+        country=tuple(country or ()),
+        ats=tuple(ats or ()),
+        remote=remote,
+        employment_type=tuple(employment_type or ()),
+        department=tuple(department or ()),
+        salary_min_usd=salary_min_usd,
+        posted_hours=posted_hours,
+        include_undated=include_undated,
+        company=company,
+    )
+
+    requested = [name for name in (facets_ or list(q.FACET_COLUMNS))
+                 if name in q.FACET_COLUMNS]
+
+    groups: list[FacetGroup] = []
+    with get_db() as conn:
+        total = conn.execute(*q.build_count(f)).fetchone()[0]
+        for facet_name in requested:
+            sql, params = q.build_facet(f, facet_name, limit=limit_per_facet)
+            rows = conn.execute(sql, params).fetchall()
+            counts = []
+            for r in rows:
+                value = r["value"]
+                if facet_name == "remote" and value is not None:
+                    value = bool(value)
+                counts.append(FacetCount(value=value, count=r["n"]))
+            groups.append(FacetGroup(name=facet_name, counts=counts))
+
+    return FacetsResponse(facets=groups, total_matching=total)
+
+
+@router.get("/companies", response_model=CompaniesResponse)
+def companies(
+    q_: Annotated[str | None, Query(alias="q", description="Company name prefix")] = None,
+    country: Annotated[list[str] | None, Query()] = None,
+    posted_hours: Annotated[int, Query(ge=0, le=720)] = 720,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> CompaniesResponse:
+    """Top companies by job count. Used for typeahead and the stats page."""
+    conditions = ["company IS NOT NULL", "company != ''"]
+    params: list = []
+
+    if q_:
+        conditions.append("company LIKE ?")
+        params.append(f"%{q_}%")
+
+    if country:
+        ph = ",".join(["?"] * len(country))
+        conditions.append(f"country IN ({ph})")
+        params.extend(country)
+
+    if posted_hours and posted_hours > 0:
+        conditions.append(
+            "COALESCE(posted_at, first_seen_at) >= datetime('now', ?)"
+        )
+        params.append(f"-{posted_hours} hours")
+
+    where = " AND ".join(conditions)
+    sql = (
+        f"SELECT company, COUNT(*) AS n FROM jobs WHERE {where} "
+        f"GROUP BY company ORDER BY n DESC LIMIT ?"
+    )
+    params.append(limit)
+
+    with get_db() as conn:
+        rows = conn.execute(sql, params).fetchall()
+
+    return CompaniesResponse(
+        companies=[CompanyHit(company=r["company"], count=r["n"]) for r in rows]
+    )
+
+
+@router.get("/{job_id}", response_model=JobDetail)
+def get_job(job_id: int) -> JobDetail:
+    with get_db() as conn:
+        row = conn.execute(
+            f"SELECT {q.DETAIL_COLUMNS} FROM jobs j WHERE j.id = ?", (job_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "job not found")
+        saved_ids = _saved_ids_for(conn, [job_id])
+    return JobDetail(**q.row_to_detail(row, saved_ids))

@@ -1,0 +1,159 @@
+{# ============================================================
+   Base layout — applyd dashboard
+
+   Blocks subclasses can override:
+     {% block title %}     → page title (suffix " · applyd" added)
+     {% block head %}      → extra <head> content (per-page CSS/meta)
+     {% block nav_extra %} → extra controls in the header
+     {% block main %}      → page body
+     {% block scripts %}   → end-of-body scripts
+
+   Context vars (provided by router):
+     transparency: { total: int, window_label: str, refreshed_label: str }
+================================================================= #}<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Search, filter, and save jobs from 40+ ATS platforms — refreshed daily.">
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}{% endblock %} · applyd</title>
+
+  {# FOUC prevention — set theme class BEFORE the stylesheet loads. #}
+  <script>
+    (function () {
+      try {
+        var stored = localStorage.getItem("applyd:theme");
+        var sys = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        var mode = stored === "dark" || stored === "light" ? stored : sys;
+        if (mode === "dark") document.documentElement.classList.add("dark");
+        document.documentElement.dataset.theme = mode;
+      } catch (e) {}
+    })();
+  </script>
+
+  <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%23111827'/%3E%3Cstop offset='1' stop-color='%234f46e5'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Ctext x='32' y='44' font-family='Inter, sans-serif' font-size='36' font-weight='700' fill='white' text-anchor='middle'%3Ea%3C/text%3E%3C/svg%3E">
+
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script defer src="{{ url_for('static', path='js/theme.js') }}"></script>
+
+  {% block head %}{% endblock %}
+</head>
+
+<body class="bg-bg text-text antialiased" {% block body_attrs %}{% endblock %}>
+
+  {# ===== Header ====================================================== #}
+  <header class="sticky top-0 z-30 border-b border-border-base bg-bg/85 backdrop-blur-md">
+    <div class="mx-auto flex h-14 max-w-screen-2xl items-center gap-3 px-4 lg:px-6">
+
+      <a href="/" class="flex items-center gap-2 font-semibold tracking-tight">
+        <span class="grid h-7 w-7 place-items-center rounded-base bg-accent text-accent-fg text-sm font-bold">a</span>
+        <span class="hidden sm:inline">applyd</span>
+      </a>
+
+      {# Search slot — pages override this. Default: disabled placeholder. #}
+      {% block header_search %}
+      <div class="relative flex-1 max-w-xl">
+        <input type="search"
+               class="input pl-9"
+               placeholder="Search jobs, companies, skills…"
+               aria-label="Search"
+               disabled>
+        <svg class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-subtle"
+             viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/>
+          <path d="m21 21-4.3-4.3"/>
+        </svg>
+      </div>
+      {% endblock %}
+
+      {# Transparency pill — surfaces the rolling-30d scope honestly #}
+      {% if transparency %}
+      <span class="hidden md:inline-flex pill" title="Rolling 30-day window">
+        <span class="pill-dot"></span>
+        <span class="tabular">{{ "{:,}".format(transparency.total) }}</span>
+        <span class="text-text-subtle">jobs · {{ transparency.window_label }} · refreshed {{ transparency.refreshed_label }}</span>
+      </span>
+      {% endif %}
+
+      {% block nav_extra %}{% endblock %}
+
+      {# Stats link #}
+      <a href="/stats"
+         class="btn btn-ghost btn-icon"
+         title="Stats"
+         aria-label="Stats">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="20" x2="18" y2="10"/>
+          <line x1="12" y1="20" x2="12" y2="4"/>
+          <line x1="6"  y1="20" x2="6"  y2="14"/>
+        </svg>
+      </a>
+
+      {# Saved-jobs link — direct to MS2 work queue. #}
+      <a href="/saved"
+         class="btn btn-ghost btn-icon"
+         title="Saved jobs"
+         aria-label="Saved jobs">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+        </svg>
+      </a>
+
+      {# Theme toggle — Alpine-driven; mirrors current theme via x-text. #}
+      <button type="button"
+              class="btn btn-ghost btn-icon"
+              x-data
+              @click="window.applydTheme.toggle()"
+              :title="document.documentElement.classList.contains('dark') ? 'Switch to light' : 'Switch to dark'"
+              aria-label="Toggle theme">
+        {# Sun icon — visible in dark mode (clicking goes to light) #}
+        <svg class="h-4 w-4 hidden dark:block" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+        </svg>
+        {# Moon icon — visible in light mode (clicking goes to dark) #}
+        <svg class="h-4 w-4 dark:hidden" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+
+    </div>
+
+    {# Mobile transparency pill — collapses below header on narrow viewports #}
+    {% if transparency %}
+    <div class="md:hidden border-t border-border-base px-4 py-2 text-xs text-text-subtle">
+      <span class="tabular text-text">{{ "{:,}".format(transparency.total) }}</span> jobs ·
+      {{ transparency.window_label }} · refreshed {{ transparency.refreshed_label }}
+    </div>
+    {% endif %}
+  </header>
+
+  {# ===== Main ======================================================== #}
+  <main class="mx-auto max-w-screen-2xl px-4 lg:px-6 py-6 lg:py-8">
+    {% block main %}{% endblock %}
+  </main>
+
+  {# ===== Footer ====================================================== #}
+  <footer class="border-t border-border-base mt-12">
+    <div class="mx-auto max-w-screen-2xl px-4 lg:px-6 py-6 text-xs text-text-subtle flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
+      <div>
+        applyd · MS1 · powered by the open
+        <a href="https://data.stapply.ai/" target="_blank" rel="noopener"
+           class="underline decoration-dotted underline-offset-2 hover:text-text">jobhive</a>
+        dataset (MIT)
+      </div>
+      <div class="flex items-center gap-4">
+        <a href="/styleguide" class="hover:text-text">styleguide</a>
+        <a href="/docs" class="hover:text-text">api docs</a>
+      </div>
+    </div>
+  </footer>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

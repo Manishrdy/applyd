@@ -1,0 +1,374 @@
+/* ============================================================
+ * applyd — Tailwind v4 entry stylesheet
+ *
+ * Build:
+ *   tailwindcss -i static/css/input.css -o static/css/app.css --minify
+ * Watch:
+ *   tailwindcss -i static/css/input.css -o static/css/app.css --watch
+ *
+ * Layered structure:
+ *   tokens.css   → CSS variables (themed via :root.dark)
+ *   tailwindcss  → utility classes pulled from `templates/**` and `static/js/**`
+ *   custom layer → component primitives & overrides
+ * ============================================================ */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap");
+@import "./tokens.css";
+@import "tailwindcss";
+
+/* Tell v4 where to scan for class usage. */
+@source "../../templates/**/*.html";
+@source "../js/**/*.js";
+
+/* Class-based dark mode (replaces v3's `darkMode: 'class'`). */
+@variant dark (&:where(.dark, .dark *));
+
+/* Theme tokens — Tailwind generates utility names from these. */
+@theme {
+  --color-bg:               hsl(var(--bg));
+  --color-surface:          hsl(var(--surface));
+  --color-surface-elevated: hsl(var(--surface-elevated));
+  --color-surface-muted:    hsl(var(--surface-muted));
+
+  --color-border-base:      hsl(var(--border));
+  --color-border-strong:    hsl(var(--border-strong));
+
+  --color-text:             hsl(var(--text));
+  --color-text-muted:       hsl(var(--text-muted));
+  --color-text-subtle:      hsl(var(--text-subtle));
+
+  --color-accent:           hsl(var(--accent));
+  --color-accent-hover:     hsl(var(--accent-hover));
+  --color-accent-fg:        hsl(var(--accent-fg));
+
+  --color-success:          hsl(var(--success));
+  --color-success-fg:       hsl(var(--success-fg));
+  --color-warning:          hsl(var(--warning));
+  --color-warning-fg:       hsl(var(--warning-fg));
+  --color-danger:           hsl(var(--danger));
+  --color-danger-fg:        hsl(var(--danger-fg));
+  --color-info:             hsl(var(--info));
+  --color-info-fg:          hsl(var(--info-fg));
+
+  --color-ring:             hsl(var(--ring));
+
+  --radius-base:            var(--radius);
+  --radius-sm:              var(--radius-sm);
+  --radius-lg:              var(--radius-lg);
+  --radius-pill:            var(--radius-pill);
+
+  --shadow-soft:            var(--shadow);
+  --shadow-soft-sm:         var(--shadow-sm);
+  --shadow-soft-lg:         var(--shadow-lg);
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+/* ---- Base layer ------------------------------------------- */
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    background-color: hsl(var(--bg));
+    color: hsl(var(--text));
+    /* Inter looks best with kerning + ligatures + tabular numerals on tables */
+    font-feature-settings: "cv11", "ss01", "ss03";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: hsl(var(--bg));
+    color: hsl(var(--text));
+    min-height: 100dvh;
+  }
+
+  /* Smooth theme transitions on the elements that change colors */
+  body, .surface, .card, .nav, .btn, .input, .badge {
+    transition:
+      background-color 180ms ease,
+      border-color 180ms ease,
+      color 180ms ease;
+  }
+
+  /* Tabular numerals for everything looking like a number */
+  .tabular,
+  table td,
+  .stat-number {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Honest scrollbar in dark mode */
+  ::selection {
+    background-color: hsl(var(--accent) / 0.15);
+    color: hsl(var(--text));
+  }
+
+  *:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+/* ---- Component primitives -------------------------------- */
+
+@layer components {
+  /* Card — the workhorse container */
+  .card {
+    background-color: hsl(var(--surface));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .card-elevated {
+    background-color: hsl(var(--surface-elevated));
+    box-shadow: var(--shadow);
+  }
+
+  .card-interactive {
+    cursor: pointer;
+    transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+  }
+
+  .card-interactive:hover {
+    border-color: hsl(var(--border-strong));
+    box-shadow: var(--shadow);
+    transform: translateY(-1px);
+  }
+
+  /* Button base */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.875rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.25;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-primary {
+    background-color: hsl(var(--accent));
+    color: hsl(var(--accent-fg));
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background-color: hsl(var(--accent-hover));
+  }
+
+  .btn-secondary {
+    background-color: hsl(var(--surface));
+    color: hsl(var(--text));
+    border-color: hsl(var(--border));
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background-color: hsl(var(--surface-muted));
+    border-color: hsl(var(--border-strong));
+  }
+
+  .btn-ghost {
+    background-color: transparent;
+    color: hsl(var(--text));
+  }
+
+  .btn-ghost:hover:not(:disabled) {
+    background-color: hsl(var(--surface-muted));
+  }
+
+  .btn-danger {
+    background-color: hsl(var(--danger));
+    color: hsl(var(--danger-fg));
+  }
+
+  .btn-sm {
+    padding: 0.25rem 0.625rem;
+    font-size: 0.8125rem;
+    border-radius: 0.375rem;
+  }
+
+  .btn-lg {
+    padding: 0.625rem 1.125rem;
+    font-size: 0.9375rem;
+  }
+
+  .btn-icon {
+    padding: 0.5rem;
+    aspect-ratio: 1;
+  }
+
+  /* Input */
+  .input {
+    display: block;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    background-color: hsl(var(--surface-muted));
+    color: hsl(var(--text));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius-sm);
+  }
+
+  .input::placeholder {
+    color: hsl(var(--text-subtle));
+  }
+
+  .input:focus {
+    outline: none;
+    border-color: hsl(var(--ring));
+    box-shadow: 0 0 0 3px hsl(var(--ring) / 0.15);
+  }
+
+  /* Select shares input styling */
+  .select {
+    appearance: none;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.625rem center;
+    background-size: 12px;
+    padding-right: 2rem;
+  }
+
+  /* Badge / chip */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.25;
+    border-radius: var(--radius-pill);
+    border: 1px solid hsl(var(--border));
+    background-color: hsl(var(--surface-muted));
+    color: hsl(var(--text-muted));
+  }
+
+  .badge-accent {
+    background-color: hsl(var(--accent) / 0.10);
+    color: hsl(var(--accent));
+    border-color: hsl(var(--accent) / 0.20);
+  }
+
+  .badge-success {
+    background-color: hsl(var(--success) / 0.10);
+    color: hsl(var(--success));
+    border-color: hsl(var(--success) / 0.25);
+  }
+
+  .badge-warning {
+    background-color: hsl(var(--warning) / 0.12);
+    color: hsl(var(--warning));
+    border-color: hsl(var(--warning) / 0.30);
+  }
+
+  .badge-danger {
+    background-color: hsl(var(--danger) / 0.12);
+    color: hsl(var(--danger));
+    border-color: hsl(var(--danger) / 0.30);
+  }
+
+  .badge-info {
+    background-color: hsl(var(--info) / 0.10);
+    color: hsl(var(--info));
+    border-color: hsl(var(--info) / 0.25);
+  }
+
+  /* Skeleton loader */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--surface-muted)) 0%,
+      hsl(var(--border)) 50%,
+      hsl(var(--surface-muted)) 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.6s ease-in-out infinite;
+    border-radius: var(--radius-sm);
+  }
+
+  @keyframes skeleton-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* Toast */
+  .toast {
+    background-color: hsl(var(--surface-elevated));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    padding: 0.75rem 1rem;
+    font-size: 0.875rem;
+    color: hsl(var(--text));
+  }
+
+  /* Drawer (mobile filter sidebar) */
+  .drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    background-color: hsl(0 0% 0% / 0.5);
+    backdrop-filter: blur(4px);
+    z-index: 40;
+  }
+
+  .drawer-panel {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    width: 85vw;
+    max-width: 340px;
+    background-color: hsl(var(--surface));
+    border-right: 1px solid hsl(var(--border));
+    box-shadow: var(--shadow-lg);
+    z-index: 50;
+    overflow-y: auto;
+  }
+
+  /* Pill — like badge but bigger, used for status indicators */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem 0.625rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1.25;
+    border-radius: var(--radius-pill);
+    background-color: hsl(var(--surface-muted));
+    color: hsl(var(--text-muted));
+    border: 1px solid hsl(var(--border));
+  }
+
+  /* Dot indicator inside a pill */
+  .pill-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background-color: hsl(var(--success));
+  }
+}
+
+/* ---- Utilities additions --------------------------------- */
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .text-pretty {
+    text-wrap: pretty;
+  }
+}

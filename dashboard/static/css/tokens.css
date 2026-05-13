@@ -1,0 +1,102 @@
+/* ============================================================
+ * Design tokens — applyd dashboard
+ *
+ * Two themes via class strategy:
+ *   :root         → light theme (default)
+ *   :root.dark    → dark theme (toggle by adding class="dark" to <html>)
+ *
+ * All values are HSL components (no `hsl(...)` wrapper) so Tailwind
+ * utilities can compose alpha via `bg-bg/50` syntax. Tailwind references
+ * these via `hsl(var(--bg) / <alpha-value>)` in input.css.
+ *
+ * Inspired by shadcn/ui's token model — neutral, premium, calm.
+ * ============================================================ */
+
+:root {
+  /* Surfaces (light) */
+  --bg:               0   0%   100%;   /* page background */
+  --surface:          0   0%   98%;    /* cards, panels */
+  --surface-elevated: 0   0%   100%;   /* modals, popovers */
+  --surface-muted:    220 14%  96%;    /* subtle hover, input bg */
+
+  /* Borders (light) */
+  --border:           220 13%  91%;
+  --border-strong:    220 13%  82%;
+
+  /* Text (light) */
+  --text:             224 71%  4%;
+  --text-muted:       220 9%   46%;
+  --text-subtle:      220 9%   60%;
+
+  /* Accent — primary interactive (light: dark accent on light bg) */
+  --accent:           224 71%  4%;
+  --accent-hover:     224 71%  10%;
+  --accent-fg:        0   0%   100%;
+
+  /* Semantic */
+  --success:          142 76%  36%;
+  --success-fg:       0   0%   100%;
+  --warning:          38  92%  50%;
+  --warning-fg:       38  100% 10%;
+  --danger:           0   84%  60%;
+  --danger-fg:        0   0%   100%;
+  --info:             217 91%  60%;
+  --info-fg:          0   0%   100%;
+
+  /* Focus ring */
+  --ring:             217 91%  60%;
+
+  /* Radii — premium feel leans on slightly larger curves */
+  --radius:           0.875rem;        /* 14px — default */
+  --radius-sm:        0.5rem;          /* 8px */
+  --radius-lg:        1.25rem;         /* 20px */
+  --radius-pill:      9999px;
+
+  /* Elevation — subtle, modern */
+  --shadow-sm:        0 1px 2px 0 hsl(220 43% 11% / 0.04),
+                      0 1px 1px 0 hsl(220 43% 11% / 0.02);
+  --shadow:           0 4px 8px -2px hsl(220 43% 11% / 0.06),
+                      0 2px 4px -1px hsl(220 43% 11% / 0.04);
+  --shadow-lg:        0 16px 32px -8px hsl(220 43% 11% / 0.10),
+                      0 4px 8px -2px hsl(220 43% 11% / 0.06);
+}
+
+:root.dark {
+  /* Surfaces (dark) */
+  --bg:               224 71%  4%;
+  --surface:          222 47%  8%;
+  --surface-elevated: 217 33%  12%;
+  --surface-muted:    217 33%  15%;
+
+  /* Borders (dark) */
+  --border:           215 28%  17%;
+  --border-strong:    215 28%  25%;
+
+  /* Text (dark) */
+  --text:             210 40%  96%;
+  --text-muted:       215 20%  65%;
+  --text-subtle:      215 16%  47%;
+
+  /* Accent — primary interactive (dark: light accent on dark bg) */
+  --accent:           210 40%  96%;
+  --accent-hover:     210 40%  85%;
+  --accent-fg:        222 47%  8%;
+
+  /* Semantic — slightly desaturated for dark backgrounds */
+  --success:          142 71%  45%;
+  --success-fg:       0   0%   8%;
+  --warning:          38  92%  60%;
+  --warning-fg:       38  100% 10%;
+  --danger:           0   72%  55%;
+  --danger-fg:        0   0%   100%;
+  --info:             217 91%  65%;
+  --info-fg:          0   0%   8%;
+
+  /* Focus ring */
+  --ring:             217 91%  65%;
+
+  /* Elevation — softer in dark mode */
+  --shadow-sm:        0 1px 2px 0 hsl(0 0% 0% / 0.4);
+  --shadow:           0 4px 8px -2px hsl(0 0% 0% / 0.5);
+  --shadow-lg:        0 16px 32px -8px hsl(0 0% 0% / 0.6);
+}

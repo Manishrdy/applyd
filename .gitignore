@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# uv
+.uv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Project data (microservice-local)
+dashboard/data/
+dashboard/cache/
+dashboard/.venv/
+dashboard/uv.lock.local
+
+# Generated CSS (build artifact from `tailwindcss -i input.css -o app.css`)
+dashboard/static/css/app.css
+dashboard/static/css/app.css.map
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Build artifacts
+dist/
+build/
+*.dist-info/

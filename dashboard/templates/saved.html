@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% from "_components/macros.html" import skeleton_card %}
+
+{% block title %}Saved jobs{% endblock %}
+
+{% block body_attrs %}x-data="savedPage()" x-init="init()"{% endblock %}
+
+{% block head %}
+  <script defer src="{{ url_for('static', path='js/saved.js') }}"></script>
+{% endblock %}
+
+{% block main %}
+<div class="space-y-6">
+
+  <header class="space-y-2">
+    <h1 class="text-3xl font-semibold tracking-tight">Saved jobs</h1>
+    <p class="text-text-muted text-pretty">
+      Your queue for the MS2 auto-apply agent. Cycle status with the badge, remove with the × button, click a card to open the listing.
+    </p>
+  </header>
+
+  {# Status tabs #}
+  <div class="border-b border-border-base">
+    <div class="flex flex-wrap items-center gap-1 -mb-px">
+      <template x-for="tab in STATUS_TABS" :key="tab.value">
+        <button type="button"
+                @click="setTab(tab.value)"
+                :class="statusTab === tab.value
+                  ? 'border-accent text-text'
+                  : 'border-transparent text-text-muted hover:text-text hover:border-border-strong'"
+                class="px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors">
+          <span x-text="tab.label"></span>
+          <span x-show="statusTab === tab.value"
+                class="ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-surface-muted text-xs px-1.5 tabular text-text-muted"
+                x-text="total.toLocaleString()"></span>
+        </button>
+      </template>
+    </div>
+  </div>
+
+  {# Error state #}
+  <div x-show="error" class="toast">
+    <div class="flex items-start gap-3">
+      <svg class="h-4 w-4 text-danger shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01" stroke-linecap="round"/></svg>
+      <div class="flex-1 text-sm">Couldn't load saved jobs · <span x-text="error" class="text-text-muted"></span></div>
+      <button class="btn btn-secondary btn-sm" @click="fetchSaved()">Retry</button>
+    </div>
+  </div>
+
+  {# Loading skeletons #}
+  <div x-show="isLoading" class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
+    {% for _ in range(3) %}
+      {{ skeleton_card() }}
+    {% endfor %}
+  </div>
+
+  {# Empty state #}
+  <div x-show="!isLoading && items.length === 0 && !error" class="card p-12 text-center space-y-3">
+    <div class="mx-auto grid h-10 w-10 place-items-center rounded-full bg-surface-muted">
+      <svg class="h-5 w-5 text-text-subtle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+    </div>
+    <div class="space-y-1">
+      <h3 class="font-semibold text-text">
+        <span x-show="statusTab === 'all'">No saved jobs yet</span>
+        <span x-show="statusTab !== 'all'">No <span x-text="statusTab"></span> jobs</span>
+      </h3>
+      <p class="text-text-muted text-sm">
+        <span x-show="statusTab === 'all'">Click the bookmark icon on any job card to queue it for MS2.</span>
+        <span x-show="statusTab !== 'all'">Try a different status tab.</span>
+      </p>
+    </div>
+    <a href="/" class="btn btn-secondary btn-sm mx-auto">Browse jobs</a>
+  </div>
+
+  {# Result grid #}
+  <div x-show="!isLoading && items.length > 0" class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
+    <template x-for="item in items" :key="item.id">
+
+      <article class="card relative flex flex-col">
+        <a :href="'/job/' + item.id" class="block p-4 space-y-3 flex-1 flex flex-col">
+
+          <div class="space-y-1 pr-16">
+            <h3 class="font-semibold text-text leading-snug line-clamp-2 text-pretty"
+                x-text="item.title || 'Untitled'"></h3>
+            <p class="text-sm text-text-muted truncate" x-text="item.company || '—'"></p>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-1.5 text-xs">
+            <span class="text-text-muted truncate" x-text="item.location || '—'"></span>
+            <template x-if="item.is_remote">
+              <span class="badge badge-success">Remote</span>
+            </template>
+            <template x-if="item.ats_type">
+              <span class="badge" x-text="item.ats_type"></span>
+            </template>
+          </div>
+
+          {# Notes preview #}
+          <template x-if="item.notes">
+            <p class="text-xs text-text-muted italic line-clamp-2 border-l-2 border-border-base pl-2"
+               x-text="item.notes"></p>
+          </template>
+
+          <div class="mt-auto flex items-end justify-between pt-2 border-t border-border-base">
+            <span class="font-mono tabular text-sm text-text" x-text="formatSalary(item)"></span>
+            <span class="text-xs text-text-subtle">
+              saved <span x-text="formatTimeAgo(item.saved_at)"></span>
+            </span>
+          </div>
+        </a>
+
+        {# Inline action chips — outside the anchor so clicks don't navigate. #}
+        <div class="absolute top-3 right-3 flex items-center gap-1">
+          <button type="button"
+                  @click.stop.prevent="cycleStatus(item)"
+                  class="badge cursor-pointer hover:opacity-80"
+                  :class="'badge-' + statusVariant(item.status)"
+                  :title="'Click to cycle status (current: ' + item.status + ')'"
+                  x-text="item.status"></button>
+
+          <button type="button"
+                  @click.stop.prevent="remove(item)"
+                  class="grid h-7 w-7 place-items-center rounded-sm text-text-subtle hover:bg-surface-muted hover:text-danger"
+                  title="Remove from saved"
+                  aria-label="Remove">
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </article>
+    </template>
+  </div>
+
+</div>
+{% endblock %}

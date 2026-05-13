@@ -1,0 +1,198 @@
+{# ============================================================
+   Component macros — applyd dashboard
+
+   Usage:
+     {% from "_components/macros.html" import button, badge, card_open, card_close, ... %}
+
+   Each macro outputs minimal markup; styling lives in static/css/input.css
+   under @layer components, so swapping themes / tweaking visuals never
+   requires touching templates.
+================================================================= #}
+
+
+{# ---- Button ----------------------------------------------- #}
+{% macro button(label, variant="primary", size="md", icon=None, type="button", href=None, attrs="") -%}
+  {%- set classes = "btn btn-" ~ variant -%}
+  {%- if size != "md" %}{% set classes = classes ~ " btn-" ~ size %}{% endif -%}
+  {%- if href -%}
+    <a href="{{ href }}" class="{{ classes }}" {{ attrs|safe }}>
+      {%- if icon %}{{ icon|safe }}{% endif -%}
+      {{ label }}
+    </a>
+  {%- else -%}
+    <button type="{{ type }}" class="{{ classes }}" {{ attrs|safe }}>
+      {%- if icon %}{{ icon|safe }}{% endif -%}
+      {{ label }}
+    </button>
+  {%- endif -%}
+{%- endmacro %}
+
+
+{# ---- Icon-only button ------------------------------------- #}
+{% macro icon_button(svg, variant="ghost", title="", attrs="") -%}
+  <button type="button" class="btn btn-{{ variant }} btn-icon" title="{{ title }}" aria-label="{{ title }}" {{ attrs|safe }}>
+    {{ svg|safe }}
+  </button>
+{%- endmacro %}
+
+
+{# ---- Badge / chip ----------------------------------------- #}
+{% macro badge(label, variant="neutral", icon=None, dismissible=False) -%}
+  {%- set classes = "badge" -%}
+  {%- if variant != "neutral" %}{% set classes = classes ~ " badge-" ~ variant %}{% endif -%}
+  <span class="{{ classes }}">
+    {%- if icon %}{{ icon|safe }}{% endif -%}
+    {{ label }}
+    {%- if dismissible %}
+      <button type="button" class="ml-0.5 -mr-1 text-current opacity-70 hover:opacity-100" aria-label="Remove">
+        <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    {%- endif -%}
+  </span>
+{%- endmacro %}
+
+
+{# ---- Pill (status indicator) ------------------------------ #}
+{% macro pill(label, dot_color="success") -%}
+  <span class="pill">
+    <span class="pill-dot" style="background-color: hsl(var(--{{ dot_color }}));"></span>
+    {{ label }}
+  </span>
+{%- endmacro %}
+
+
+{# ---- Card containers (use as a pair) ---------------------- #}
+{% macro card_open(extra="", interactive=False, elevated=False) -%}
+  {%- set classes = "card" -%}
+  {%- if elevated %}{% set classes = classes ~ " card-elevated" %}{% endif -%}
+  {%- if interactive %}{% set classes = classes ~ " card-interactive" %}{% endif -%}
+  {%- if extra %}{% set classes = classes ~ " " ~ extra %}{% endif -%}
+  <div class="{{ classes }}">
+{%- endmacro %}
+
+{% macro card_close() -%}
+  </div>
+{%- endmacro %}
+
+
+{# ---- Input (text/email/number/etc) ------------------------ #}
+{% macro input(name, type="text", placeholder="", value="", label=None, hint=None, leading_icon=None, attrs="") -%}
+  <div class="space-y-1.5">
+    {%- if label %}
+      <label for="input-{{ name }}" class="text-sm font-medium text-text">{{ label }}</label>
+    {% endif -%}
+    <div class="relative">
+      {%- if leading_icon %}
+        <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-subtle">{{ leading_icon|safe }}</span>
+      {% endif -%}
+      <input id="input-{{ name }}"
+             name="{{ name }}"
+             type="{{ type }}"
+             value="{{ value }}"
+             placeholder="{{ placeholder }}"
+             class="input{% if leading_icon %} pl-9{% endif %}"
+             {{ attrs|safe }}>
+    </div>
+    {%- if hint %}
+      <p class="text-xs text-text-subtle">{{ hint }}</p>
+    {% endif -%}
+  </div>
+{%- endmacro %}
+
+
+{# ---- Select (native dropdown, premium-styled) ------------- #}
+{% macro select(name, options, value=None, label=None, hint=None, placeholder=None, attrs="") -%}
+  <div class="space-y-1.5">
+    {%- if label %}
+      <label for="select-{{ name }}" class="text-sm font-medium text-text">{{ label }}</label>
+    {% endif -%}
+    <select id="select-{{ name }}" name="{{ name }}" class="input select" {{ attrs|safe }}>
+      {%- if placeholder %}
+        <option value="" {% if not value %}selected{% endif %} disabled hidden>{{ placeholder }}</option>
+      {% endif -%}
+      {%- for opt in options %}
+        {%- if opt is mapping %}
+          <option value="{{ opt.value }}" {% if value == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+        {%- else %}
+          <option value="{{ opt }}" {% if value == opt %}selected{% endif %}>{{ opt }}</option>
+        {%- endif %}
+      {% endfor -%}
+    </select>
+    {%- if hint %}
+      <p class="text-xs text-text-subtle">{{ hint }}</p>
+    {% endif -%}
+  </div>
+{%- endmacro %}
+
+
+{# ---- Skeleton placeholders -------------------------------- #}
+{% macro skeleton_line(width="100%", height="0.875rem") -%}
+  <div class="skeleton" style="width: {{ width }}; height: {{ height }};"></div>
+{%- endmacro %}
+
+{% macro skeleton_card() -%}
+  <div class="card p-4 space-y-3">
+    {{ skeleton_line(width="60%", height="1rem") }}
+    {{ skeleton_line(width="40%", height="0.75rem") }}
+    <div class="flex gap-2 pt-1">
+      {{ skeleton_line(width="60px", height="1.25rem") }}
+      {{ skeleton_line(width="80px", height="1.25rem") }}
+    </div>
+  </div>
+{%- endmacro %}
+
+
+{# ---- Toast ------------------------------------------------- #}
+{% macro toast(message, variant="info", icon=None) -%}
+  <div class="toast flex items-start gap-3" role="status">
+    {%- if icon %}
+      <span class="text-{{ variant }}">{{ icon|safe }}</span>
+    {% endif -%}
+    <div class="flex-1 text-sm">{{ message }}</div>
+  </div>
+{%- endmacro %}
+
+
+{# ---- Drawer (mobile slide-in panel) ----------------------- #}
+{# Wrap your sidebar content inside this. Driven by Alpine state. #}
+{% macro drawer_open(state_var="drawerOpen") -%}
+  <div x-show="{{ state_var }}" x-transition.opacity class="drawer-backdrop" @click="{{ state_var }} = false" style="display: none;"></div>
+  <aside x-show="{{ state_var }}"
+         x-transition:enter="transition transform duration-200 ease-out"
+         x-transition:enter-start="-translate-x-full"
+         x-transition:enter-end="translate-x-0"
+         x-transition:leave="transition transform duration-150 ease-in"
+         x-transition:leave-start="translate-x-0"
+         x-transition:leave-end="-translate-x-full"
+         class="drawer-panel"
+         style="display: none;">
+    <div class="p-4">
+{%- endmacro %}
+
+{% macro drawer_close() -%}
+    </div>
+  </aside>
+{%- endmacro %}
+
+
+{# ---- Pagination ------------------------------------------- #}
+{% macro pagination(page, total_pages, base_url="?") -%}
+  <nav class="flex items-center justify-between text-sm" aria-label="Pagination">
+    <p class="text-text-muted">
+      Page <span class="tabular text-text">{{ page }}</span>
+      of <span class="tabular text-text">{{ total_pages }}</span>
+    </p>
+    <div class="flex gap-1">
+      {%- if page > 1 %}
+        <a href="{{ base_url }}page={{ page - 1 }}" class="btn btn-secondary btn-sm">← Prev</a>
+      {%- else %}
+        <button class="btn btn-secondary btn-sm" disabled>← Prev</button>
+      {% endif -%}
+      {%- if page < total_pages %}
+        <a href="{{ base_url }}page={{ page + 1 }}" class="btn btn-secondary btn-sm">Next →</a>
+      {%- else %}
+        <button class="btn btn-secondary btn-sm" disabled>Next →</button>
+      {% endif -%}
+    </div>
+  </nav>
+{%- endmacro %}

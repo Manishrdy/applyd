@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% from "_components/macros.html" import button, badge, icon_button, skeleton_card %}
+
+{% block title %}Jobs{% endblock %}
+
+{% block body_attrs %}x-data="dashboard()" x-init="init()"{% endblock %}
+
+{% block head %}
+  <script defer src="{{ url_for('static', path='js/dashboard.js') }}"></script>
+{% endblock %}
+
+{# ============================================================
+   Header search — hijacks base.html's placeholder slot.
+================================================================= #}
+{% block header_search %}
+<div class="relative flex-1 max-w-xl">
+  <input type="search"
+         class="input pl-9"
+         placeholder="Search jobs, companies, skills…"
+         aria-label="Search"
+         x-model.debounce.300ms="filters.q"
+         @input.debounce.300ms="onFilterChange()">
+  <svg class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-subtle"
+       viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="11" cy="11" r="8"/>
+    <path d="m21 21-4.3-4.3"/>
+  </svg>
+</div>
+{% endblock %}
+
+{# ============================================================
+   Reusable sidebar markup — rendered twice (sticky desktop +
+   teleported mobile drawer) via `_components/_filter_sidebar.html`.
+================================================================= #}
+{% block main %}
+
+<div class="grid lg:grid-cols-[280px_1fr] gap-6">
+
+  {# ---- Mobile filter trigger ---- #}
+  <div class="lg:hidden flex items-center justify-between">
+    <button class="btn btn-secondary" @click="drawerOpen = true">
+      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/>
+      </svg>
+      Filters
+      <span x-show="activeChips().length"
+            x-text="activeChips().length"
+            class="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent text-accent-fg text-xs px-1 tabular"></span>
+    </button>
+    <p class="text-sm text-text-muted">
+      <span class="text-text font-medium tabular" x-text="total.toLocaleString()"></span> jobs
+    </p>
+  </div>
+
+  {# ---- Desktop sticky sidebar ---- #}
+  <aside class="hidden lg:block">
+    <div class="sticky top-20 max-h-[calc(100dvh-6rem)] overflow-y-auto pr-1 -mr-1">
+      {% include "_components/_filter_sidebar.html" %}
+    </div>
+  </aside>
+
+  {# ---- Mobile drawer ---- #}
+  <template x-teleport="body">
+    <div>
+      <div x-show="drawerOpen"
+           x-transition.opacity
+           @click="drawerOpen = false"
+           class="drawer-backdrop"
+           style="display: none;"></div>
+      <aside x-show="drawerOpen"
+             x-transition:enter="transition transform duration-200 ease-out"
+             x-transition:enter-start="-translate-x-full"
+             x-transition:enter-end="translate-x-0"
+             x-transition:leave="transition transform duration-150 ease-in"
+             x-transition:leave-start="translate-x-0"
+             x-transition:leave-end="-translate-x-full"
+             @keydown.escape.window="drawerOpen = false"
+             class="drawer-panel"
+             style="display: none;">
+        <div class="p-4">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold">Filters</h2>
+            <button type="button" class="btn btn-ghost btn-icon" @click="drawerOpen = false" aria-label="Close">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+          {% include "_components/_filter_sidebar.html" %}
+        </div>
+      </aside>
+    </div>
+  </template>
+
+  {# ===== MAIN COLUMN =================================================== #}
+  <section class="min-w-0 space-y-4">
+
+    {# Result count header + sort #}
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">
+          <span class="tabular" x-text="total.toLocaleString()"></span>
+          jobs
+        </h1>
+        <p class="text-sm text-text-muted">
+          <span x-text="filters.country.includes('US') ? 'United States · ' : ''"></span>
+          <span x-text="POSTED_OPTIONS.find(o => o.value === filters.posted_hours)?.label.toLowerCase()"></span>
+        </p>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <label for="sort-select" class="text-sm text-text-muted">Sort</label>
+        <select id="sort-select" class="input select py-1.5 pr-8 pl-3 text-sm w-auto"
+                x-model="sort" @change="onFilterChange()">
+          <template x-for="opt in SORT_OPTIONS" :key="opt.value">
+            <option :value="opt.value"
+                    :disabled="opt.requires_q && !filters.q"
+                    x-text="opt.label"></option>
+          </template>
+        </select>
+      </div>
+    </div>
+
+    {# Active filter chips #}
+    <div class="flex flex-wrap items-center gap-2" x-show="activeChips().length">
+      <template x-for="chip in activeChips()" :key="chip.label">
+        <button type="button" class="badge" @click="removeChip(chip)">
+          <span x-text="chip.label"></span>
+          <svg class="h-3 w-3 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </template>
+      <button type="button"
+              class="text-xs text-text-muted underline-offset-2 hover:underline hover:text-text"
+              @click="clearAll()">
+        clear all
+      </button>
+    </div>
+
+    {# Error state #}
+    <div x-show="error" class="toast">
+      <div class="flex items-start gap-3">
+        <svg class="h-4 w-4 text-danger shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01" stroke-linecap="round"/></svg>
+        <div class="flex-1 text-sm">
+          <p>Couldn't load jobs · <span x-text="error" class="text-text-muted"></span></p>
+        </div>
+        <button class="btn btn-secondary btn-sm" @click="fetchJobs(true)">Retry</button>
+      </div>
+    </div>
+
+    {# Loading skeletons — first paint #}
+    <div x-show="isLoading && jobs.length === 0"
+         class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
+      {% for _ in range(6) %}
+        {{ skeleton_card() }}
+      {% endfor %}
+    </div>
+
+    {# Result grid #}
+    <div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4"
+         x-show="!isLoading || jobs.length > 0">
+      <template x-for="job in jobs" :key="job.id">
+
+        <article class="card card-interactive relative flex flex-col">
+          <a :href="'/job/' + job.id"
+             class="block p-4 space-y-3 flex-1 flex flex-col">
+            {# title + company #}
+            <div class="space-y-1 pr-8">
+              <h3 class="font-semibold text-text leading-snug line-clamp-2 text-pretty"
+                  x-text="job.title || 'Untitled'"></h3>
+              <p class="text-sm text-text-muted truncate" x-text="job.company || '—'"></p>
+            </div>
+
+            {# meta row #}
+            <div class="flex flex-wrap items-center gap-1.5 text-xs">
+              <span class="text-text-muted truncate" x-text="formatLocation(job)"></span>
+              <template x-if="job.is_remote">
+                <span class="badge badge-success">Remote</span>
+              </template>
+              <template x-if="job.ats_type">
+                <span class="badge" x-text="job.ats_type"></span>
+              </template>
+              <template x-if="job.employment_type">
+                <span class="badge" x-text="job.employment_type"></span>
+              </template>
+            </div>
+
+            {# bottom row: salary + date #}
+            <div class="mt-auto flex items-end justify-between pt-2 border-t border-border-base">
+              <span class="font-mono tabular text-sm text-text" x-text="formatSalary(job)"></span>
+              <span class="text-xs text-text-subtle" x-text="formatTimeLabel(job)"></span>
+            </div>
+          </a>
+
+          {# save button — outside the anchor so it doesn't navigate #}
+          <button type="button"
+                  class="absolute top-3 right-3 grid h-7 w-7 place-items-center rounded-sm text-text-subtle hover:bg-surface-muted hover:text-text"
+                  :class="{ 'text-accent': job.is_saved }"
+                  @click.stop.prevent="toggleSave(job)"
+                  :title="job.is_saved ? 'Remove from saved' : 'Save for later'"
+                  :aria-label="job.is_saved ? 'Unsave' : 'Save'">
+            <template x-if="!job.is_saved">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+              </svg>
+            </template>
+            <template x-if="job.is_saved">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+            </template>
+          </button>
+        </article>
+      </template>
+    </div>
+
+    {# Empty state #}
+    <div x-show="!isLoading && jobs.length === 0 && !error"
+         class="card p-12 text-center space-y-3">
+      <div class="mx-auto grid h-10 w-10 place-items-center rounded-full bg-surface-muted">
+        <svg class="h-5 w-5 text-text-subtle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      </div>
+      <div class="space-y-1">
+        <h3 class="font-semibold text-text">No jobs match these filters</h3>
+        <p class="text-text-muted text-sm">Try removing a filter or widening the time window.</p>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm mx-auto" @click="clearAll()">
+        Clear all filters
+      </button>
+    </div>
+
+    {# Infinite scroll sentinel + loading-more spinner #}
+    <div class="py-6 text-center">
+      <div x-show="isLoadingMore" class="inline-flex items-center gap-2 text-sm text-text-muted">
+        <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" stroke-linecap="round"/></svg>
+        Loading more…
+      </div>
+      <p x-show="!isLoadingMore && !hasMore && jobs.length > 0" class="text-sm text-text-subtle">
+        End of results · <span class="tabular" x-text="jobs.length.toLocaleString()"></span> shown
+      </p>
+      <div x-ref="sentinel" class="h-1"></div>
+    </div>
+
+  </section>
+</div>
+
+{% endblock %}

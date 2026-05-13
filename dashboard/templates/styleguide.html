@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+{% from "_components/macros.html" import button, icon_button, badge, pill, card_open, card_close, input, select, skeleton_line, skeleton_card, toast, pagination %}
+
+{% block title %}Styleguide{% endblock %}
+
+{% block main %}
+<div class="space-y-12 max-w-5xl">
+
+  <header class="space-y-2">
+    <h1 class="text-3xl font-semibold tracking-tight text-balance">Design system</h1>
+    <p class="text-text-muted">
+      Visual reference for every primitive used by the dashboard. Toggle the theme via the sun/moon icon in the header — every token here re-renders.
+    </p>
+  </header>
+
+  {# ===== Color tokens ============================================ #}
+  <section class="space-y-4">
+    <h2 class="text-xl font-semibold">Surfaces & tokens</h2>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {% for swatch in [
+        {"name": "bg",                "var": "--bg"},
+        {"name": "surface",           "var": "--surface"},
+        {"name": "surface-elevated",  "var": "--surface-elevated"},
+        {"name": "surface-muted",     "var": "--surface-muted"},
+        {"name": "border",            "var": "--border"},
+        {"name": "border-strong",     "var": "--border-strong"},
+        {"name": "accent",            "var": "--accent"},
+        {"name": "ring",              "var": "--ring"},
+      ] %}
+      <div class="card p-3 space-y-2">
+        <div class="h-12 w-full rounded-sm border border-border-base" style="background-color: hsl(var({{ swatch.var }}));"></div>
+        <div class="text-xs">
+          <div class="font-medium">{{ swatch.name }}</div>
+          <div class="text-text-subtle font-mono">{{ swatch.var }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  {# ===== Typography ============================================== #}
+  <section class="space-y-4">
+    <h2 class="text-xl font-semibold">Typography</h2>
+    {{ card_open("p-6 space-y-4") }}
+      <div class="space-y-1">
+        <p class="text-xs uppercase tracking-wider text-text-subtle">heading 1 · 2.25rem · 600</p>
+        <h1 class="text-4xl font-semibold tracking-tight">Senior Software Engineer</h1>
+      </div>
+      <div class="space-y-1">
+        <p class="text-xs uppercase tracking-wider text-text-subtle">heading 2 · 1.5rem · 600</p>
+        <h2 class="text-2xl font-semibold tracking-tight">Find your next role</h2>
+      </div>
+      <div class="space-y-1">
+        <p class="text-xs uppercase tracking-wider text-text-subtle">heading 3 · 1.125rem · 600</p>
+        <h3 class="text-lg font-semibold">2,932,499 jobs across 47 ATS sources</h3>
+      </div>
+      <div class="space-y-1">
+        <p class="text-xs uppercase tracking-wider text-text-subtle">body · 0.875rem</p>
+        <p class="text-text">Refreshed every 24 hours. Defaults to USA jobs posted in the last 24h.</p>
+      </div>
+      <div class="space-y-1">
+        <p class="text-xs uppercase tracking-wider text-text-subtle">muted · text-text-muted</p>
+        <p class="text-text-muted">Filter by ATS, salary, employment type, and remote flag.</p>
+      </div>
+      <div class="space-y-1">
+        <p class="text-xs uppercase tracking-wider text-text-subtle">subtle · text-text-subtle</p>
+        <p class="text-text-subtle">First seen 4 hours ago</p>
+      </div>
+      <div class="space-y-1">
+        <p class="text-xs uppercase tracking-wider text-text-subtle">tabular numerals</p>
+        <p class="font-mono tabular text-lg">$185,000 — $240,000 / year</p>
+      </div>
+    {{ card_close() }}
+  </section>
+
+  {# ===== Buttons ================================================= #}
+  <section class="space-y-4">
+    <h2 class="text-xl font-semibold">Buttons</h2>
+    {{ card_open("p-6 space-y-6") }}
+      <div class="flex flex-wrap items-center gap-3">
+        {{ button("Primary",   variant="primary") }}
+        {{ button("Secondary", variant="secondary") }}
+        {{ button("Ghost",     variant="ghost") }}
+        {{ button("Danger",    variant="danger") }}
+        {{ button("Disabled",  variant="primary", attrs="disabled") }}
+      </div>
+      <div class="flex flex-wrap items-center gap-3">
+        {{ button("Small",  variant="primary", size="sm") }}
+        {{ button("Medium", variant="primary") }}
+        {{ button("Large",  variant="primary", size="lg") }}
+      </div>
+      <div class="flex flex-wrap items-center gap-3">
+        {{ icon_button(svg='<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z"/></svg>', title="Save") }}
+        {{ icon_button(svg='<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>', title="Download") }}
+        {{ icon_button(svg='<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>', title="Help") }}
+      </div>
+    {{ card_close() }}
+  </section>
+
+  {# ===== Badges & pills ========================================= #}
+  <section class="space-y-4">
+    <h2 class="text-xl font-semibold">Badges & pills</h2>
+    {{ card_open("p-6 space-y-4") }}
+      <div class="flex flex-wrap gap-2">
+        {{ badge("Neutral") }}
+        {{ badge("Accent",  variant="accent") }}
+        {{ badge("Success", variant="success") }}
+        {{ badge("Warning", variant="warning") }}
+        {{ badge("Danger",  variant="danger") }}
+        {{ badge("Info",    variant="info") }}
+      </div>
+      <div class="flex flex-wrap gap-2">
+        {{ badge("Greenhouse",   variant="accent") }}
+        {{ badge("Remote",       variant="success") }}
+        {{ badge("USA",          variant="info") }}
+        {{ badge("Senior",       variant="warning") }}
+        {{ badge("country: US",  dismissible=True) }}
+        {{ badge("ats: lever",   variant="accent", dismissible=True) }}
+      </div>
+      <div class="flex flex-wrap gap-2">
+        {{ pill("3.2M jobs · last 30d · refreshed 4h ago") }}
+        {{ pill("Live data", dot_color="success") }}
+        {{ pill("Stale 28h", dot_color="warning") }}
+      </div>
+    {{ card_close() }}
+  </section>
+
+  {# ===== Inputs ================================================== #}
+  <section class="space-y-4">
+    <h2 class="text-xl font-semibold">Inputs</h2>
+    {{ card_open("p-6 grid sm:grid-cols-2 gap-6") }}
+      {{ input("role", label="Role", placeholder="e.g. Senior Backend Engineer") }}
+      {{ input("salary", type="number", label="Min salary (USD/yr)", placeholder="100000", hint="Annual, USD only — non-USD jobs are excluded from this filter") }}
+      {{ input("location", label="Location", placeholder="city, state…",
+        leading_icon='<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 10c0 7-8 13-8 13s-8-6-8-13a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>') }}
+      {{ select("country", options=[
+        {"value": "US", "label": "United States"},
+        {"value": "GB", "label": "United Kingdom"},
+        {"value": "DE", "label": "Germany"},
+        {"value": "IN", "label": "India"},
+      ], value="US", label="Country") }}
+      {{ select("posted", options=[
+        {"value": "24",  "label": "Last 24 hours"},
+        {"value": "48",  "label": "Last 48 hours"},
+        {"value": "72",  "label": "Last 72 hours"},
+        {"value": "168", "label": "Last 7 days"},
+        {"value": "720", "label": "Last 30 days"},
+      ], value="24", label="Posted within") }}
+      {{ select("sort", options=[
+        {"value": "newest",      "label": "Newest first"},
+        {"value": "salary_high", "label": "Salary: high → low"},
+        {"value": "salary_low",  "label": "Salary: low → high"},
+        {"value": "relevance",   "label": "Relevance"},
+      ], value="newest", label="Sort by") }}
+    {{ card_close() }}
+  </section>
+
+  {# ===== Cards ================================================== #}
+  <section class="space-y-4">
+    <h2 class="text-xl font-semibold">Cards</h2>
+    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+      {# Standard card #}
+      <div class="card p-4 space-y-3">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <h3 class="font-semibold text-text leading-snug">Senior Backend Engineer</h3>
+            <p class="text-sm text-text-muted">Stripe</p>
+          </div>
+          {{ badge("Greenhouse", variant="accent") }}
+        </div>
+        <p class="text-sm text-text-muted">San Francisco · Remote · Full-time</p>
+        <div class="flex items-center justify-between pt-1">
+          <span class="font-mono text-sm tabular text-text">$185k–$240k</span>
+          <span class="text-xs text-text-subtle">Posted 3h ago</span>
+        </div>
+      </div>
+
+      {# Interactive card (hover effect) #}
+      <div class="card card-interactive p-4 space-y-3">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <h3 class="font-semibold text-text leading-snug">Machine Learning Engineer</h3>
+            <p class="text-sm text-text-muted">OpenAI</p>
+          </div>
+          {{ badge("Lever", variant="accent") }}
+        </div>
+        <p class="text-sm text-text-muted">San Francisco</p>
+        <div class="flex items-center justify-between pt-1">
+          <span class="font-mono text-sm tabular text-text">—</span>
+          <span class="text-xs text-text-subtle">First seen 1d ago</span>
+        </div>
+        <p class="text-xs text-text-subtle italic">hover-to-elevate</p>
+      </div>
+
+      {# Elevated card #}
+      <div class="card card-elevated p-4 space-y-3">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <h3 class="font-semibold text-text leading-snug">Staff Product Designer</h3>
+            <p class="text-sm text-text-muted">Linear</p>
+          </div>
+          {{ badge("Remote", variant="success") }}
+        </div>
+        <p class="text-sm text-text-muted">Anywhere</p>
+        <div class="flex items-center justify-between pt-1">
+          <span class="font-mono text-sm tabular text-text">$210k–$260k</span>
+          <span class="text-xs text-text-subtle">Posted 6h ago</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {# ===== Skeletons ============================================== #}
+  <section class="space-y-4">
+    <h2 class="text-xl font-semibold">Loading skeletons</h2>
+    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {{ skeleton_card() }}
+      {{ skeleton_card() }}
+      {{ skeleton_card() }}
+    </div>
+  </section>
+
+  {# ===== Toasts ================================================ #}
+  <section class="space-y-4">
+    <h2 class="text-xl font-semibold">Toasts</h2>
+    <div class="space-y-3 max-w-md">
+      {{ toast("Saved to your queue. Find it under /saved.", variant="success",
+        icon='<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>') }}
+      {{ toast("Couldn't reach upstream. Showing cached data.", variant="warning",
+        icon='<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>') }}
+    </div>
+  </section>
+
+  {# ===== Pagination ============================================ #}
+  <section class="space-y-4">
+    <h2 class="text-xl font-semibold">Pagination</h2>
+    {{ card_open("p-4") }}
+      {{ pagination(page=3, total_pages=42) }}
+    {{ card_close() }}
+  </section>
+
+  {# ===== Drawer demo =========================================== #}
+  <section class="space-y-4" x-data="{ drawerOpen: false }">
+    <h2 class="text-xl font-semibold">Drawer (mobile filter sidebar)</h2>
+    {{ card_open("p-4") }}
+      <p class="text-sm text-text-muted mb-3">Used as the filter sidebar on mobile. Backdrop closes on click; ESC closes too (Phase 4 will wire keyboard).</p>
+      <button type="button" class="btn btn-secondary" @click="drawerOpen = true">Open drawer</button>
+    {{ card_close() }}
+
+    <template x-teleport="body">
+      <div>
+        <div x-show="drawerOpen" x-transition.opacity class="drawer-backdrop" @click="drawerOpen = false" style="display: none;"></div>
+        <aside x-show="drawerOpen"
+               x-transition:enter="transition transform duration-200 ease-out"
+               x-transition:enter-start="-translate-x-full"
+               x-transition:enter-end="translate-x-0"
+               x-transition:leave="transition transform duration-150 ease-in"
+               x-transition:leave-start="translate-x-0"
+               x-transition:leave-end="-translate-x-full"
+               class="drawer-panel"
+               style="display: none;">
+          <div class="p-4 space-y-4">
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold">Filters</h3>
+              {{ icon_button(svg='<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>', title="Close", attrs="@click=\"drawerOpen = false\"") }}
+            </div>
+            <div class="space-y-3">
+              {{ input("drawer_search", placeholder="Search…") }}
+              {{ select("drawer_country", options=["US", "GB", "DE", "IN"], value="US", label="Country") }}
+              {{ select("drawer_remote", options=["Any", "Remote only", "On-site only"], value="Any", label="Work mode") }}
+            </div>
+          </div>
+        </aside>
+      </div>
+    </template>
+  </section>
+
+</div>
+{% endblock %}

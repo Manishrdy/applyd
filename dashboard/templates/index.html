@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "_components/macros.html" import button, badge, card_open, card_close, skeleton_card %}
+
+{% block title %}Jobs{% endblock %}
+
+{% block main %}
+<div class="space-y-6">
+
+  {# Phase-3 placeholder. Phase 4 replaces this whole block with the real
+     filter sidebar + result grid + infinite scroll. #}
+  <div class="card p-8 text-center space-y-4">
+    <div class="mx-auto grid h-12 w-12 place-items-center rounded-base bg-accent/10 text-accent">
+      <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/>
+      </svg>
+    </div>
+    <div class="space-y-1 max-w-md mx-auto">
+      <h1 class="text-2xl font-semibold tracking-tight">Phase 3 — design system shipped</h1>
+      <p class="text-text-muted text-pretty">
+        Visual primitives are in place: Tailwind v4 + Inter + token-based light/dark themes.
+        Phase 4 wires the unified search-first dashboard on top of these.
+      </p>
+    </div>
+    <div class="flex justify-center gap-2 pt-2">
+      {{ button("View styleguide", variant="primary",  href="/styleguide") }}
+      {{ button("Open API docs",   variant="secondary", href="/docs") }}
+    </div>
+  </div>
+
+  {# A few summary stats (real data from /api/stats/summary) #}
+  {% if summary %}
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="card p-4 space-y-1">
+      <p class="text-xs uppercase tracking-wider text-text-subtle">Total jobs</p>
+      <p class="stat-number text-2xl font-semibold">{{ "{:,}".format(summary.total_jobs) }}</p>
+    </div>
+    <div class="card p-4 space-y-1">
+      <p class="text-xs uppercase tracking-wider text-text-subtle">USA · last 24h</p>
+      <p class="stat-number text-2xl font-semibold">{{ "{:,}".format(summary.us_24h) }}</p>
+    </div>
+    <div class="card p-4 space-y-1">
+      <p class="text-xs uppercase tracking-wider text-text-subtle">USA · last 7d</p>
+      <p class="stat-number text-2xl font-semibold">{{ "{:,}".format(summary.us_7d) }}</p>
+    </div>
+    <div class="card p-4 space-y-1">
+      <p class="text-xs uppercase tracking-wider text-text-subtle">ATS sources</p>
+      <p class="stat-number text-2xl font-semibold">{{ summary.ats_count }}</p>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

@@ -1,0 +1,170 @@
+{# ============================================================
+   Filter sidebar — included twice (sticky desktop + mobile drawer).
+   Assumes Alpine `dashboard()` scope is active on an ancestor.
+================================================================= #}
+
+<div class="space-y-6">
+
+  {# ===== Posted within (radio) ===== #}
+  <fieldset class="space-y-2">
+    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Posted within</legend>
+    <div class="space-y-1">
+      <template x-for="opt in POSTED_OPTIONS" :key="opt.value">
+        <label class="flex items-center gap-2 px-1 py-1 cursor-pointer rounded-sm hover:bg-surface-muted">
+          <input type="radio"
+                 name="posted_hours"
+                 :value="opt.value"
+                 :checked="filters.posted_hours === opt.value"
+                 @change="filters.posted_hours = opt.value; onFilterChange()"
+                 class="accent-accent">
+          <span class="text-sm" x-text="opt.label"></span>
+        </label>
+      </template>
+    </div>
+  </fieldset>
+
+  {# ===== Country (facet multi) ===== #}
+  <fieldset class="space-y-2">
+    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Country</legend>
+    <div class="space-y-1 max-h-48 overflow-y-auto">
+      <template x-for="row in facets.country.slice(0, 12)" :key="row.value || '_'">
+        <label class="flex items-center justify-between gap-2 px-1 py-1 cursor-pointer rounded-sm hover:bg-surface-muted">
+          <span class="flex items-center gap-2 min-w-0">
+            <input type="checkbox"
+                   :checked="row.value && isChecked('country', row.value)"
+                   :disabled="!row.value"
+                   @change="row.value && toggleArrayFilter('country', row.value)"
+                   class="accent-accent">
+            <span class="text-sm truncate" x-text="row.value || '— unknown'"></span>
+          </span>
+          <span class="text-xs text-text-subtle tabular shrink-0" x-text="row.count.toLocaleString()"></span>
+        </label>
+      </template>
+    </div>
+  </fieldset>
+
+  {# ===== Remote (segmented) ===== #}
+  <fieldset class="space-y-2">
+    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Work mode</legend>
+    <div class="grid grid-cols-3 gap-1 p-1 bg-surface-muted rounded-sm">
+      <button type="button"
+              class="px-2 py-1 text-xs rounded-sm"
+              :class="filters.remote === null ? 'bg-surface text-text shadow-soft-sm' : 'text-text-muted hover:text-text'"
+              @click="setRemote('any')">Any</button>
+      <button type="button"
+              class="px-2 py-1 text-xs rounded-sm"
+              :class="filters.remote === true ? 'bg-surface text-text shadow-soft-sm' : 'text-text-muted hover:text-text'"
+              @click="setRemote('remote')">Remote</button>
+      <button type="button"
+              class="px-2 py-1 text-xs rounded-sm"
+              :class="filters.remote === false ? 'bg-surface text-text shadow-soft-sm' : 'text-text-muted hover:text-text'"
+              @click="setRemote('onsite')">On-site</button>
+    </div>
+  </fieldset>
+
+  {# ===== ATS (facet multi) ===== #}
+  <fieldset class="space-y-2"
+            x-data="{ expanded: false }">
+    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">ATS source</legend>
+    <div class="space-y-1 max-h-72 overflow-y-auto">
+      <template x-for="(row, i) in facets.ats" :key="row.value || '_'">
+        <label x-show="expanded || i < 8"
+               class="flex items-center justify-between gap-2 px-1 py-1 cursor-pointer rounded-sm hover:bg-surface-muted">
+          <span class="flex items-center gap-2 min-w-0">
+            <input type="checkbox"
+                   :checked="row.value && isChecked('ats', row.value)"
+                   :disabled="!row.value"
+                   @change="row.value && toggleArrayFilter('ats', row.value)"
+                   class="accent-accent">
+            <span class="text-sm truncate" x-text="row.value || '— unknown'"></span>
+          </span>
+          <span class="text-xs text-text-subtle tabular shrink-0" x-text="row.count.toLocaleString()"></span>
+        </label>
+      </template>
+    </div>
+    <button type="button"
+            x-show="facets.ats.length > 8"
+            @click="expanded = !expanded"
+            class="text-xs text-text-muted hover:text-text underline-offset-2 hover:underline">
+      <span x-show="!expanded">Show all (<span x-text="facets.ats.length"></span>)</span>
+      <span x-show="expanded">Show fewer</span>
+    </button>
+  </fieldset>
+
+  {# ===== Employment type (facet multi) ===== #}
+  <fieldset class="space-y-2" x-show="facets.employment_type.length">
+    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Employment type</legend>
+    <div class="space-y-1 max-h-48 overflow-y-auto">
+      <template x-for="row in facets.employment_type.slice(0, 8)" :key="row.value || '_'">
+        <label class="flex items-center justify-between gap-2 px-1 py-1 cursor-pointer rounded-sm hover:bg-surface-muted">
+          <span class="flex items-center gap-2 min-w-0">
+            <input type="checkbox"
+                   :checked="row.value && isChecked('employment_type', row.value)"
+                   :disabled="!row.value"
+                   @change="row.value && toggleArrayFilter('employment_type', row.value)"
+                   class="accent-accent">
+            <span class="text-sm truncate" x-text="row.value || '— unknown'"></span>
+          </span>
+          <span class="text-xs text-text-subtle tabular shrink-0" x-text="row.count.toLocaleString()"></span>
+        </label>
+      </template>
+    </div>
+  </fieldset>
+
+  {# ===== Salary minimum ===== #}
+  <fieldset class="space-y-2">
+    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Min salary (USD/yr)</legend>
+    <div class="flex items-center gap-2">
+      <input type="number"
+             min="0"
+             step="10000"
+             placeholder="any"
+             class="input text-sm"
+             x-model.number.lazy="filters.salary_min_usd"
+             @change="onFilterChange()">
+      <button type="button"
+              x-show="filters.salary_min_usd"
+              @click="filters.salary_min_usd = null; onFilterChange()"
+              class="btn btn-ghost btn-icon btn-sm"
+              aria-label="Clear">
+        <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="flex flex-wrap gap-1">
+      <template x-for="preset in [100000, 150000, 200000, 250000]">
+        <button type="button"
+                @click="filters.salary_min_usd = preset; onFilterChange()"
+                class="text-xs px-2 py-0.5 rounded-pill border border-border-base text-text-muted hover:text-text hover:bg-surface-muted">
+          $<span x-text="(preset / 1000) + 'k'"></span>+
+        </button>
+      </template>
+    </div>
+    <p class="text-xs text-text-subtle">Annual USD only · non-USD jobs excluded from this filter.</p>
+  </fieldset>
+
+  {# ===== Show undated toggle ===== #}
+  <fieldset class="space-y-2">
+    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Date precision</legend>
+    <label class="flex items-start gap-2 cursor-pointer">
+      <input type="checkbox"
+             :checked="filters.include_undated"
+             @change="filters.include_undated = !filters.include_undated; onFilterChange()"
+             class="accent-accent mt-0.5">
+      <span class="text-sm">
+        Include undated jobs
+        <span class="block text-xs text-text-subtle">When upstream omits posted date, we use first-seen as the time anchor.</span>
+      </span>
+    </label>
+  </fieldset>
+
+  {# ===== Clear all ===== #}
+  <div class="pt-2 border-t border-border-base">
+    <button type="button"
+            class="btn btn-ghost btn-sm w-full justify-center"
+            @click="clearAll()"
+            :disabled="activeChips().length === 0">
+      Clear all filters
+    </button>
+  </div>
+
+</div>
