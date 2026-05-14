@@ -9,161 +9,224 @@
 {% endblock %}
 
 {% block main %}
-<div class="space-y-8 max-w-6xl">
+<div class="run-shell space-y-10 max-w-screen-2xl mx-auto">
 
-  <header class="space-y-1">
-    <div class="flex items-center gap-3">
-      <a href="/scrape" class="btn btn-ghost btn-sm" title="Back to scrape">← Scrape</a>
-      <h1 class="text-3xl font-semibold tracking-tight">Run #{{ run_id }}</h1>
-      <span x-show="run" x-cloak :class="statusClass(run?.status)" x-text="run?.status"></span>
-      <span x-show="run?.live" x-cloak class="inline-block h-2 w-2 rounded-full bg-accent animate-pulse" title="live"></span>
+  {# ====== Hero ====== #}
+  <header class="run-hero space-y-4">
+    <div class="flex items-center gap-2">
+      <a href="/scrape" class="btn btn-ghost btn-sm">
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        Scrape
+      </a>
+      <span class="text-text-subtle text-sm">/</span>
+      <span class="text-text-subtle text-sm font-mono">runs</span>
     </div>
-    <p x-show="run" x-cloak class="text-text-muted text-sm">
-      <span x-text="fmtTime(run?.started_at)"></span>
-      · <span x-text="fmtDuration(run?.started_at, run?.finished_at)"></span>
-      · triggered by <span class="font-mono" x-text="run?.triggered_by"></span>
-      <template x-if="run?.scraper_version">
-        <span> · jobhive <span class="font-mono" x-text="run.scraper_version.slice(0,8)"></span></span>
-      </template>
-      <template x-if="run?.max_companies_per_ats">
-        <span> · max <span class="tabular" x-text="run.max_companies_per_ats"></span> companies/ATS</span>
-      </template>
-    </p>
+
+    <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+      <div class="space-y-2">
+        <p class="stat-eyebrow">Scrape run</p>
+        <div class="flex items-center gap-3">
+          <h1 class="text-4xl font-semibold tracking-tight font-mono">#{{ run_id }}</h1>
+          <span x-show="run" x-cloak :class="statusClass(run?.status)" x-text="run?.status"></span>
+          <span x-show="run?.live" x-cloak class="live-dot" title="live"></span>
+        </div>
+        <p x-show="run" x-cloak class="text-text-muted text-sm flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span x-text="fmtTime(run?.started_at)"></span>
+          <span class="text-text-subtle">·</span>
+          <span class="tabular" x-text="fmtDuration(run?.started_at, run?.finished_at)"></span>
+          <span class="text-text-subtle">·</span>
+          <span>triggered by <span class="font-mono" x-text="run?.triggered_by"></span></span>
+          <template x-if="run?.scraper_version">
+            <span class="flex items-center gap-1.5">
+              <span class="text-text-subtle">·</span>
+              <span>jobhive <span class="font-mono text-text" x-text="run.scraper_version.slice(0,8)"></span></span>
+            </span>
+          </template>
+          <template x-if="run?.max_companies_per_ats">
+            <span class="flex items-center gap-1.5">
+              <span class="text-text-subtle">·</span>
+              <span>max <span class="tabular text-text" x-text="run.max_companies_per_ats"></span> companies/ATS</span>
+            </span>
+          </template>
+        </p>
+      </div>
+
+      <div class="flex flex-wrap gap-1.5 max-w-xl" x-show="run" x-cloak>
+        <template x-for="a in (run?.ats_requested || [])" :key="'rq-' + a">
+          <span class="badge font-mono" x-text="a"></span>
+        </template>
+      </div>
+    </div>
   </header>
 
+  {# ====== Error ====== #}
   <div x-show="loadError" x-cloak class="toast">
     <div class="flex items-start gap-3">
+      <svg class="h-4 w-4 text-danger mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01" stroke-linecap="round"/></svg>
       <div class="flex-1 text-sm">Couldn't load run · <span x-text="loadError"></span></div>
       <button class="btn btn-secondary btn-sm" @click="fetch()">Retry</button>
     </div>
   </div>
 
-  {# ====== Totals strip ====== #}
-  <section x-show="run" x-cloak class="grid grid-cols-2 md:grid-cols-6 gap-3">
+  {# ====== Hero stats ====== #}
+  <section x-show="run" x-cloak class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 run-stats-grid">
     <div class="card p-4">
-      <p class="text-xs uppercase tracking-wider text-text-subtle">Scraped</p>
-      <p class="text-2xl font-semibold tabular" x-text="fmtNum(run?.total_scraped)"></p>
-      <p class="text-xs text-text-subtle">jobs returned by scraper</p>
+      <p class="stat-eyebrow">Scraped</p>
+      <p class="stat-hero mt-1 text-accent" x-text="fmtNum(run?.total_scraped)"></p>
+      <p class="text-xs text-text-subtle mt-2">jobs returned</p>
     </div>
     <div class="card p-4">
-      <p class="text-xs uppercase tracking-wider text-text-subtle">Failed</p>
-      <p class="text-2xl font-semibold tabular" :class="(run?.total_failed||0) > 0 ? 'text-danger' : ''" x-text="fmtNum(run?.total_failed)"></p>
-      <p class="text-xs text-text-subtle">companies that errored</p>
+      <p class="stat-eyebrow">Written</p>
+      <p class="stat-hero mt-1" x-text="fmtNum(run?.total_written)"></p>
+      <p class="text-xs text-text-subtle mt-2">rows upserted</p>
     </div>
     <div class="card p-4">
-      <p class="text-xs uppercase tracking-wider text-text-subtle">Written</p>
-      <p class="text-2xl font-semibold tabular" x-text="fmtNum(run?.total_written)"></p>
-      <p class="text-xs text-text-subtle">rows upserted (post-filter)</p>
+      <p class="stat-eyebrow">Inserted</p>
+      <p class="stat-hero mt-1 text-success" x-text="fmtNum(run?.total_inserted)"></p>
+      <p class="text-xs text-text-subtle mt-2">new rows</p>
     </div>
     <div class="card p-4">
-      <p class="text-xs uppercase tracking-wider text-text-subtle">Inserted</p>
-      <p class="text-2xl font-semibold tabular" x-text="fmtNum(run?.total_inserted)"></p>
-      <p class="text-xs text-text-subtle">new rows</p>
+      <p class="stat-eyebrow">Updated</p>
+      <p class="stat-hero mt-1" x-text="fmtNum(run?.total_updated)"></p>
+      <p class="text-xs text-text-subtle mt-2">existing rows</p>
     </div>
     <div class="card p-4">
-      <p class="text-xs uppercase tracking-wider text-text-subtle">Updated</p>
-      <p class="text-2xl font-semibold tabular" x-text="fmtNum(run?.total_updated)"></p>
-      <p class="text-xs text-text-subtle">existing rows</p>
+      <p class="stat-eyebrow">Failed</p>
+      <p class="stat-hero mt-1" :class="(run?.total_failed||0) > 0 ? 'text-danger' : 'text-text-subtle'"
+         x-text="fmtNum(run?.total_failed)"></p>
+      <p class="text-xs text-text-subtle mt-2">companies errored</p>
     </div>
     <div class="card p-4">
-      <p class="text-xs uppercase tracking-wider text-text-subtle">ATS</p>
-      <p class="text-2xl font-semibold tabular" x-text="(run?.ats_requested || []).length"></p>
-      <p class="text-xs text-text-subtle font-mono break-all" x-text="(run?.ats_requested || []).join(', ')"></p>
+      <p class="stat-eyebrow">ATS</p>
+      <p class="stat-hero mt-1" x-text="(run?.ats_requested || []).length"></p>
+      <p class="text-xs text-text-subtle mt-2 font-mono break-all"
+         x-text="(run?.ats_requested || []).slice(0,3).join(', ') + ((run?.ats_requested || []).length > 3 ? `, +${(run?.ats_requested || []).length - 3}` : '')"></p>
     </div>
   </section>
 
-  {# ====== Per-ATS breakdown ====== #}
-  <section class="space-y-3" x-show="run" x-cloak>
+  {# ====== Per-ATS detail ====== #}
+  <section class="space-y-4 run-detail-list" x-show="run" x-cloak>
     <h2 class="text-xl font-semibold">Per-ATS detail</h2>
 
     <template x-for="ats in run?.per_ats || []" :key="ats.id">
-      <div class="card p-5 space-y-4">
-        <div class="flex items-center justify-between flex-wrap gap-2">
-          <div class="flex items-center gap-3">
-            <h3 class="text-lg font-semibold" x-text="ats.ats"></h3>
-            <span :class="statusClass(ats.status)" x-text="ats.status"></span>
-            <span class="text-xs text-text-subtle" x-text="fmtDuration(ats.started_at, ats.finished_at)"></span>
-            <span class="text-xs text-text-subtle font-mono">phase <span x-text="ats.phase || 'pending'"></span></span>
-          </div>
-          <div class="flex items-center gap-2">
-            <a
-              :href="viewJobsUrl(ats)"
-              class="btn btn-primary btn-sm"
-              x-show="ats.rows_written > 0"
-              x-cloak
-              title="Open the dashboard scoped to the rows this run touched on this ATS">
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
-              View <span x-text="fmtNum(ats.rows_written)"></span> jobs
-            </a>
-            <button class="btn btn-ghost btn-sm" @click="toggleLog(ats.ats)" :disabled="!ats.log_path">
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-              <span x-text="logs[ats.ats]?.open ? 'Hide log' : 'View log'"></span>
-            </button>
-          </div>
-        </div>
+      <div class="card card-elevated overflow-hidden">
+        <div class="p-5 lg:p-6 space-y-5">
 
-        {# Companies progress bar #}
-        <div class="space-y-1">
-          <div class="flex justify-between text-xs text-text-muted">
-            <span>companies</span>
-            <span class="tabular">
-              <span class="text-text" x-text="fmtNum(ats.companies_succeeded)"></span>
-              <span class="text-text-subtle">/ <span x-text="fmtNum(ats.companies_total)"></span> succeeded</span>
-              <template x-if="ats.companies_failed > 0">
-                <span class="text-danger ml-2">· <span x-text="fmtNum(ats.companies_failed)"></span> failed</span>
-              </template>
-            </span>
+          {# Row header #}
+          <div class="flex flex-wrap items-center gap-3 justify-between">
+            <div class="flex items-center gap-3 min-w-0">
+              <h3 class="text-lg font-semibold" x-text="ats.ats"></h3>
+              <span :class="statusClass(ats.status)" x-text="ats.status"></span>
+              <span x-show="ats.status === 'running'" x-cloak class="live-dot"></span>
+              <span class="text-xs text-text-subtle tabular" x-text="fmtDuration(ats.started_at, ats.finished_at)"></span>
+              <span class="text-xs text-text-subtle font-mono">phase <span x-text="ats.phase || 'pending'"></span></span>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <a :href="viewJobsUrl(ats)"
+                 class="btn btn-primary btn-sm"
+                 x-show="ats.rows_written > 0"
+                 x-cloak
+                 title="Open the dashboard scoped to the rows this run touched on this ATS">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+                View <span x-text="fmtNum(ats.rows_written)"></span> jobs
+              </a>
+              <button class="btn btn-secondary btn-sm" @click="toggleLog(ats.ats)" :disabled="!ats.log_path">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                <span x-text="logs[ats.ats]?.open ? 'Hide log' : 'View log'"></span>
+              </button>
+            </div>
           </div>
-          <div class="h-2 rounded-full bg-surface-muted overflow-hidden">
-            <div class="h-full bg-accent transition-all"
-                 :style="`width: ${pct((ats.companies_succeeded||0) + (ats.companies_failed||0), ats.companies_total||0)}%`"></div>
-          </div>
-        </div>
 
-        {# Counter grid #}
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1">
+          {# Companies progress bar #}
           <div>
-            <p class="text-xs text-text-subtle">Rows scraped</p>
-            <p class="text-xl font-semibold tabular" x-text="fmtNum(ats.rows_scraped)"></p>
+            <div class="flex flex-wrap items-baseline justify-between text-xs text-text-muted mb-1.5 gap-2">
+              <span class="stat-eyebrow text-text-subtle">Companies</span>
+              <span class="tabular text-sm">
+                <span class="text-text font-semibold" x-text="fmtNum(ats.companies_succeeded)"></span>
+                <span class="text-text-subtle">/ <span x-text="fmtNum(ats.companies_total)"></span> succeeded</span>
+                <template x-if="ats.companies_failed > 0">
+                  <span class="text-danger ml-2">· <span x-text="fmtNum(ats.companies_failed)"></span> failed</span>
+                </template>
+              </span>
+            </div>
+            <div class="progress-bar h-2.5">
+              <div class="progress-fill"
+                   :style="`width: ${pct((ats.companies_succeeded||0) + (ats.companies_failed||0), ats.companies_total||0)}%`"></div>
+              <div class="progress-fail"
+                   :style="`width: ${pct(ats.companies_failed||0, ats.companies_total||0)}%`"></div>
+            </div>
           </div>
-          <div>
-            <p class="text-xs text-text-subtle">Inserted / Updated</p>
-            <p class="text-xl font-semibold tabular"><span x-text="fmtNum(ats.rows_inserted)"></span> / <span x-text="fmtNum(ats.rows_updated)"></span></p>
-          </div>
-          <div>
-            <p class="text-xs text-text-subtle">Rows written</p>
-            <p class="text-xl font-semibold tabular" x-text="fmtNum(ats.rows_written)"></p>
-          </div>
-          <div>
-            <p class="text-xs text-text-subtle">Failed</p>
-            <p class="text-xl font-semibold tabular" :class="(ats.rows_failed||ats.companies_failed||0) > 0 ? 'text-danger' : ''"
-               x-text="fmtNum(ats.companies_failed)"></p>
-          </div>
-          <div x-show="ats.rows_skipped_safeguard > 0" x-cloak>
-            <p class="text-xs text-text-subtle">Safeguard preserved</p>
-            <p class="text-xl font-semibold tabular text-warning" x-text="fmtNum(ats.rows_skipped_safeguard)"></p>
-          </div>
-        </div>
 
-        {# Error / note #}
-        <div x-show="ats.error" x-cloak class="text-sm">
-          <p class="text-xs uppercase tracking-wider text-text-subtle">Note</p>
-          <p class="font-mono text-text-muted break-words" x-text="ats.error"></p>
+          {# Counter grid #}
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div>
+              <p class="stat-eyebrow">Rows scraped</p>
+              <p class="text-2xl font-semibold tabular mt-1" x-text="fmtNum(ats.rows_scraped)"></p>
+            </div>
+            <div>
+              <p class="stat-eyebrow">Inserted / Updated</p>
+              <p class="text-2xl font-semibold tabular mt-1">
+                <span class="text-success" x-text="fmtNum(ats.rows_inserted)"></span>
+                <span class="text-text-subtle text-lg">/</span>
+                <span x-text="fmtNum(ats.rows_updated)"></span>
+              </p>
+            </div>
+            <div>
+              <p class="stat-eyebrow">Rows written</p>
+              <p class="text-2xl font-semibold tabular mt-1" x-text="fmtNum(ats.rows_written)"></p>
+            </div>
+            <div>
+              <p class="stat-eyebrow">Failed</p>
+              <p class="text-2xl font-semibold tabular mt-1"
+                 :class="(ats.rows_failed||ats.companies_failed||0) > 0 ? 'text-danger' : 'text-text-subtle'"
+                 x-text="fmtNum(ats.companies_failed)"></p>
+            </div>
+          </div>
+
+          <div x-show="ats.rows_skipped_safeguard > 0" x-cloak
+               class="flex items-center gap-3 rounded-base bg-warning/5 border border-warning/30 px-3 py-2 text-sm">
+            <svg class="h-4 w-4 text-warning shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <div class="flex-1">
+              <p class="font-medium">Empty-ATS safeguard tripped.</p>
+              <p class="text-xs text-text-muted">
+                Scraper returned 0 rows; <span class="tabular text-text" x-text="fmtNum(ats.rows_skipped_safeguard)"></span>
+                existing rows preserved (the daily cron will refresh them).
+              </p>
+            </div>
+          </div>
+
+          {# Error / note #}
+          <div x-show="ats.error" x-cloak class="space-y-1">
+            <p class="stat-eyebrow">Note</p>
+            <p class="font-mono text-text-muted break-words text-sm" x-text="ats.error"></p>
+          </div>
         </div>
 
         {# Log viewer (lazy-loaded) #}
-        <div x-show="logs[ats.ats]?.open" x-cloak class="border-t border-border-base pt-3">
-          <div class="flex items-center justify-between mb-2">
-            <p class="text-xs uppercase tracking-wider text-text-subtle">
-              Subprocess log
-              <span x-show="ats.log_path" class="font-mono text-text-subtle/70" x-text="ats.log_path"></span>
-            </p>
-            <span x-show="logs[ats.ats]?.loading" class="text-xs text-text-subtle">loading…</span>
+        <div x-show="logs[ats.ats]?.open" x-cloak
+             class="border-t border-border-base bg-surface-muted/30">
+          <div class="p-5 lg:p-6 space-y-2">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+              <p class="stat-eyebrow">
+                Subprocess log
+                <span x-show="ats.log_path" class="font-mono text-text-subtle normal-case tracking-normal ml-2"
+                      x-text="ats.log_path"></span>
+              </p>
+              <div class="flex items-center gap-2">
+                <span x-show="logs[ats.ats]?.loading" class="text-xs text-text-subtle">loading…</span>
+                <button class="btn btn-ghost btn-sm"
+                        x-show="logs[ats.ats]?.text"
+                        @click="copyLog(ats.ats)">
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  <span x-text="logs[ats.ats]?.copied ? 'Copied' : 'Copy'"></span>
+                </button>
+              </div>
+            </div>
+            <pre x-show="!logs[ats.ats]?.loading && !logs[ats.ats]?.error"
+                 class="bg-surface border border-border-base rounded-base text-xs p-3 overflow-x-auto max-h-96 overflow-y-auto font-mono whitespace-pre"
+                 x-text="logs[ats.ats]?.text || '(empty)'"></pre>
+            <p x-show="logs[ats.ats]?.error" x-cloak class="text-sm text-danger" x-text="logs[ats.ats]?.error"></p>
           </div>
-          <pre x-show="!logs[ats.ats]?.loading && !logs[ats.ats]?.error"
-               class="bg-surface-muted border border-border-base rounded-base text-xs p-3 overflow-x-auto max-h-96 overflow-y-auto font-mono whitespace-pre"
-               x-text="logs[ats.ats]?.text || '(empty)'"></pre>
-          <p x-show="logs[ats.ats]?.error" x-cloak class="text-sm text-danger" x-text="logs[ats.ats]?.error"></p>
         </div>
       </div>
     </template>

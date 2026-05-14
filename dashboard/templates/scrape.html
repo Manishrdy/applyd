@@ -9,25 +9,35 @@
 {% endblock %}
 
 {% block main %}
-<div class="space-y-8 max-w-6xl">
+<div class="scrape-shell space-y-10 max-w-screen-2xl mx-auto">
 
-  {# ====== Header ====== #}
-  <header class="space-y-1">
-    <div class="flex items-baseline gap-3">
-      <h1 class="text-3xl font-semibold tracking-tight">Scrape</h1>
-      <span class="badge" x-show="catalog?.vendor_commit" x-cloak>
-        jobhive
-        <span class="text-text-subtle font-mono" x-text="catalog?.vendor_commit?.slice(0,8)"></span>
-      </span>
+  {# ====== Hero ====== #}
+  <header class="scrape-hero scrape-hero-layout">
+    <div class="space-y-2 max-w-2xl">
+      <p class="stat-eyebrow">Pipeline · manual control</p>
+      <h1 class="text-4xl font-semibold tracking-tight">Scrape</h1>
+      <p class="text-text-muted text-pretty">
+        Invoke the vendored jobhive scrapers on demand. The daily cron keeps
+        running independently; manual runs never prune — they upsert by URL,
+        so re-scraping is always safe.
+      </p>
     </div>
-    <p class="text-text-muted text-pretty">
-      Manually invoke the vendored jobhive scrapers when upstream is stale.
-      Daily jobhive cron continues independently. Manual runs never prune;
-      jobs are URL-deduped via UPSERT, so re-scraping never produces duplicates.
-    </p>
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="pill" x-show="catalog?.vendor_commit" x-cloak>
+        <span class="pill-dot"></span>
+        jobhive <span class="font-mono text-text-subtle ml-1" x-text="catalog?.vendor_commit?.slice(0,8)"></span>
+      </span>
+      <span class="pill" x-show="lastRunSummary()" x-cloak>
+        last <span class="text-text font-medium" x-text="lastRunSummary()"></span>
+      </span>
+      <a href="#runs" class="btn btn-ghost btn-sm" x-show="runs.length" x-cloak>
+        History
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
+      </a>
+    </div>
   </header>
 
-  {# ====== Errors ====== #}
+  {# ====== Error toast ====== #}
   <div x-show="catalogError" x-cloak class="toast">
     <div class="flex items-start gap-3">
       <svg class="h-4 w-4 text-danger mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01" stroke-linecap="round"/></svg>
@@ -36,154 +46,259 @@
     </div>
   </div>
 
-  {# ====== Panel A: Control ====== #}
-  <section class="space-y-3">
-    <h2 class="text-xl font-semibold">Control</h2>
-
-    <div class="card p-5 space-y-4">
-      <div class="space-y-2">
-        <div class="flex items-baseline justify-between gap-3">
-          <p class="text-xs uppercase tracking-wider text-text-subtle">ATS to scrape</p>
-          <p class="text-xs text-text-subtle tabular" x-show="catalog" x-cloak>
-            <span :class="atLimit() ? 'text-warning font-medium' : ''">
-              <span x-text="selected.size"></span> / <span x-text="maxAts()"></span>
-            </span>
-            selected
-          </p>
-        </div>
-        <div class="flex flex-wrap gap-2" x-show="catalog" x-cloak>
-          <template x-for="ats in catalog?.available || []" :key="ats">
-            <button
-              type="button"
-              @click="toggleAts(ats)"
-              :disabled="!isAllowed(ats) || activeRunId !== null || (atLimit() && !selected.has(ats))"
-              :class="[
-                'badge cursor-pointer transition select-none',
-                isAllowed(ats) && selected.has(ats) ? 'badge-accent' : '',
-                !isAllowed(ats) ? 'opacity-40 cursor-not-allowed' : '',
-                atLimit() && !selected.has(ats) && isAllowed(ats) ? 'opacity-40 cursor-not-allowed' : '',
-                activeRunId !== null ? 'opacity-60 cursor-not-allowed' : '',
-              ]"
-              :title="!isAllowed(ats) ? 'Not in allow-list (settings.local_scraper_allowed_ats)' : (atLimit() && !selected.has(ats) ? 'Max ' + maxAts() + ' ATS per run' : '')"
-            >
-              <span x-text="ats"></span>
-              <span x-show="isAllowed(ats) && selected.has(ats)" class="ml-1">✓</span>
-            </button>
-          </template>
-        </div>
-        <p class="text-xs text-text-subtle" x-show="catalog" x-cloak>
-          All <span x-text="(catalog?.available || []).length"></span> available ATS selectable
-          · max <span x-text="maxAts()"></span> per run (sequential)
-          · Playwright-backed ATS (e.g. Meta, Tesla, Apple, Workday) will fail at runtime
-          until the <code class="text-xs">scrapers</code> extra is installed in the vendor venv.
+  {# ====== Command Deck ====== #}
+  <section class="space-y-3 pt-6 lg:pt-8" aria-labelledby="deck-h">
+    <div class="card card-elevated command-deck overflow-hidden">
+      <div class="flex items-baseline justify-between gap-2 p-5 lg:p-6 border-b border-border-base">
+        <h2 id="deck-h" class="text-xl font-semibold">Command deck</h2>
+        <p class="text-xs text-text-subtle tabular" x-show="catalog" x-cloak>
+          <span x-text="(catalog?.available || []).length"></span> ATS available · cap
+          <span x-text="maxAts()"></span>/run · timeout <span x-text="catalog?.timeout_seconds ?? '—'"></span>s
         </p>
       </div>
+      <div class="grid lg:grid-cols-[1.4fr_1fr_0.85fr]">
 
-      <div class="flex flex-wrap items-end gap-4 pt-1">
-        <div class="space-y-1">
-          <label class="text-xs uppercase tracking-wider text-text-subtle">Preset</label>
-          <div class="flex items-center gap-2">
-            <select class="input w-56" x-model.number="activePresetId" :disabled="activeRunId !== null">
-              <option :value="0">Custom</option>
-              <template x-for="p in presets" :key="p.id">
-                <option :value="p.id" x-text="p.name"></option>
+        {# ---- Panel A: ATS picker ---------------------------- #}
+        <div class="p-5 lg:p-6 space-y-4 lg:border-r border-b lg:border-b-0 border-border-base">
+          <div class="flex items-center justify-between gap-2">
+            <p class="stat-eyebrow">Select ATS</p>
+            <p class="text-xs text-text-subtle tabular" x-show="catalog" x-cloak>
+              <span :class="atLimit() ? 'text-warning font-semibold' : 'text-text font-semibold'"
+                    x-text="selected.size"></span>
+              <span class="text-text-subtle">/ <span x-text="maxAts()"></span> selected</span>
+            </p>
+          </div>
+
+          <div class="relative">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-subtle"
+                 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+            </svg>
+            <input type="search" class="input pl-9 pr-20"
+                   placeholder="Filter ATS…"
+                   x-model="atsFilter"
+                   :disabled="activeRunId !== null">
+            <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              <button type="button" class="btn btn-ghost btn-sm"
+                      :disabled="activeRunId !== null || !canSelectMore()"
+                      @click="selectVisible()"
+                      title="Select up to the cap from visible ATS">All</button>
+              <button type="button" class="btn btn-ghost btn-sm"
+                      :disabled="activeRunId !== null || !selected.size"
+                      @click="clearSelected()">Clear</button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2"
+               x-show="catalog" x-cloak>
+            <template x-for="ats in visibleAts()" :key="ats">
+              <button
+                type="button"
+                class="tile"
+                :aria-pressed="selected.has(ats)"
+                :disabled="activeRunId !== null"
+                :data-locked="(!isAllowed(ats) || (atLimit() && !selected.has(ats))) ? '1' : null"
+                @click="toggleAts(ats)"
+                :title="tileTitle(ats)">
+                <span class="flex items-center gap-2 min-w-0">
+                  <span class="tile-dot"
+                        :class="coverageHealth(ats)"></span>
+                  <span class="truncate" x-text="ats"></span>
+                </span>
+                <svg x-show="selected.has(ats)" class="h-3.5 w-3.5 flex-shrink-0"
+                     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                     stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              </button>
+            </template>
+          </div>
+
+          <p class="text-xs text-text-subtle leading-relaxed">
+            Health dot reflects how stale this ATS's company coverage is.
+            Playwright-backed ATS (Meta, Tesla, Apple, Workday) need the
+            <code class="text-xs">scrapers</code> extra in the vendor venv.
+          </p>
+        </div>
+
+        {# ---- Panel B: Tuning -------------------------------- #}
+        <div class="p-5 lg:p-6 space-y-5 lg:border-r border-b lg:border-b-0 border-border-base">
+          <p class="stat-eyebrow">Tuning</p>
+
+          <div class="space-y-1.5">
+            <label class="text-xs font-medium text-text-muted">Preset</label>
+            <div class="flex items-center gap-2">
+              <select class="input select flex-1" x-model.number="activePresetId"
+                      :disabled="activeRunId !== null">
+                <option :value="0">Custom config</option>
+                <template x-for="p in presets" :key="p.id">
+                  <option :value="p.id" x-text="p.name"></option>
+                </template>
+              </select>
+              <button class="btn btn-secondary btn-sm"
+                      :disabled="!activePresetId || activeRunId !== null"
+                      @click="loadPreset(activePresetId)">Load</button>
+            </div>
+            <div class="flex items-center gap-2">
+              <input class="input flex-1" x-model="presetName"
+                     placeholder="Save current as…"
+                     :disabled="activeRunId !== null">
+              <button class="btn btn-ghost btn-sm"
+                      :disabled="!canSavePreset() || activeRunId !== null"
+                      @click="savePreset()">Save</button>
+              <button class="btn btn-ghost btn-sm text-danger"
+                      :disabled="!activePresetId || activeRunId !== null"
+                      @click="deletePreset(activePresetId)" title="Delete preset">
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="space-y-1.5">
+            <label class="text-xs font-medium text-text-muted">Max companies per ATS</label>
+            <input type="number" min="1" max="100000"
+                   class="input"
+                   x-model.number="maxCompanies"
+                   :disabled="activeRunId !== null"
+                   placeholder="unbounded">
+          </div>
+
+          <div class="space-y-2">
+            <label class="text-xs font-medium text-text-muted flex items-center justify-between">
+              <span>Incremental</span>
+              <span class="text-xs text-text-subtle font-normal">skip recently scraped</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer select-none">
+              <input id="inc-toggle" type="checkbox" class="checkbox"
+                     x-model="incrementalEnabled"
+                     :disabled="activeRunId !== null">
+              <span class="text-sm text-text-muted">Enabled</span>
+            </label>
+            <div class="flex items-center gap-2" :class="incrementalEnabled ? '' : 'opacity-50'">
+              <input type="number" min="1" max="365" class="input w-20"
+                     x-model.number="incrementalDays"
+                     :disabled="!incrementalEnabled || activeRunId !== null">
+              <span class="text-xs text-text-subtle">days lookback</span>
+            </div>
+          </div>
+        </div>
+
+        {# ---- Panel C: Launch -------------------------------- #}
+        <div class="p-5 lg:p-6 space-y-5 bg-surface-muted/40">
+          <p class="stat-eyebrow">Launch</p>
+
+          <div class="space-y-3">
+            <div>
+              <p class="stat-hero" x-text="selected.size || '0'"></p>
+              <p class="text-xs text-text-subtle mt-1">
+                <span x-text="selected.size === 1 ? 'ATS' : 'ATS'"></span> queued ·
+                <span x-text="estimateCompaniesLabel()"></span> companies
+              </p>
+            </div>
+
+            <div class="flex flex-wrap gap-1.5" x-show="selected.size" x-cloak>
+              <template x-for="a in selectedList()" :key="'launch-' + a">
+                <span class="badge badge-accent" x-text="a"></span>
               </template>
-            </select>
-            <button class="btn btn-secondary btn-sm" :disabled="!activePresetId || activeRunId !== null" @click="loadPreset(activePresetId)">Load</button>
+            </div>
+            <p x-show="!selected.size" x-cloak class="text-xs text-text-subtle italic">
+              Pick at least one ATS to launch.
+            </p>
           </div>
-          <div class="flex items-center gap-2">
-            <input class="input w-40" x-model="presetName" placeholder="Preset name" :disabled="activeRunId !== null">
-            <button class="btn btn-ghost btn-sm" :disabled="!canSavePreset() || activeRunId !== null" @click="savePreset()">Save current</button>
-            <button class="btn btn-ghost btn-sm text-danger" :disabled="!activePresetId || activeRunId !== null" @click="deletePreset(activePresetId)">Delete</button>
+
+          <div class="space-y-2">
+            <button
+              type="button"
+              class="btn btn-primary btn-lg btn-primary-hero w-full"
+              :disabled="!canStart()"
+              @click="start()">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <span x-text="activeRunId ? 'Run in progress…' : 'Start scrape'"></span>
+            </button>
+            <p x-show="startError" x-cloak class="text-xs text-danger" x-text="startError"></p>
+            <p class="text-xs text-text-subtle text-center">
+              Sequential · timeout <span class="tabular" x-text="catalog?.timeout_seconds ?? '—'"></span>s per ATS
+            </p>
           </div>
         </div>
 
-        <div class="space-y-1">
-          <label class="text-xs uppercase tracking-wider text-text-subtle">Max companies per ATS</label>
-          <input
-            type="number" min="1" max="100000"
-            class="input w-40"
-            x-model.number="maxCompanies"
-            :disabled="activeRunId !== null"
-            placeholder="unbounded">
-          <p class="text-xs text-text-subtle">Hard timeout: <span x-text="catalog?.timeout_seconds ?? '—'"></span>s/ATS</p>
-        </div>
-        <div class="space-y-1">
-          <label class="text-xs uppercase tracking-wider text-text-subtle">Incremental</label>
-          <div class="flex items-center gap-2">
-            <input id="inc-toggle" type="checkbox" class="checkbox" x-model="incrementalEnabled" :disabled="activeRunId !== null">
-            <label for="inc-toggle" class="text-sm text-text-muted">Skip recently scraped companies</label>
-          </div>
-          <div class="flex items-center gap-2">
-            <input type="number" min="1" max="365" class="input w-20" x-model.number="incrementalDays"
-                   :disabled="!incrementalEnabled || activeRunId !== null">
-            <span class="text-xs text-text-subtle">days lookback</span>
-          </div>
-        </div>
-
-        <div class="ml-auto flex flex-col items-end gap-1">
-          <button
-            type="button"
-            class="btn btn-primary"
-            :disabled="!canStart()"
-            @click="start()">
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Start scrape
-          </button>
-          <span x-show="startError" x-cloak class="text-xs text-danger" x-text="startError"></span>
-        </div>
       </div>
     </div>
   </section>
 
+  {# ====== Coverage ====== #}
   <section class="space-y-3" x-show="Object.keys(coverage || {}).length" x-cloak>
-    <h2 class="text-xl font-semibold">Coverage</h2>
-    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+    <div class="flex items-baseline justify-between gap-2">
+      <h2 class="text-xl font-semibold">Coverage</h2>
+      <p class="text-xs text-text-subtle">When each selected ATS was last scraped per company</p>
+    </div>
+
+    <div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-3 coverage-grid">
       <template x-for="ats in selectedList()" :key="'cov-' + ats">
-        <div class="card p-4 space-y-2">
-          <div class="flex items-center justify-between">
-            <h3 class="font-semibold text-base" x-text="ats"></h3>
-            <span class="text-xs text-warning">never: <span class="tabular" x-text="coverage?.[ats]?.never || 0"></span></span>
+        <div class="card p-4 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="font-semibold text-sm flex items-center gap-2">
+              <span class="tile-dot" :class="coverageHealth(ats)"></span>
+              <span x-text="ats"></span>
+            </h3>
+            <span class="text-xs text-text-subtle tabular">
+              <span x-text="coverageTotal(ats)"></span>
+              <span class="text-text-subtle">companies</span>
+            </span>
           </div>
-          <div class="h-2 rounded-full bg-surface-muted overflow-hidden flex">
-            <div class="bg-warning h-2" :style="`width:${bucketPct(ats,'never')}%`"></div>
-            <div class="bg-info h-2" :style="`width:${bucketPct(ats,'0_1d')}%`"></div>
-            <div class="bg-accent h-2" :style="`width:${bucketPct(ats,'2_7d')}%`"></div>
-            <div class="bg-success h-2" :style="`width:${bucketPct(ats,'8_30d')}%`"></div>
-            <div class="bg-surface-strong h-2" :style="`width:${bucketPct(ats,'gt_30d')}%`"></div>
+
+          <div class="segment-bar" :title="coverageTooltip(ats)">
+            <span class="bg-warning" :style="`width:${bucketPct(ats,'never')}%`"></span>
+            <span class="bg-info"    :style="`width:${bucketPct(ats,'0_1d')}%`"></span>
+            <span class="bg-accent"  :style="`width:${bucketPct(ats,'2_7d')}%`"></span>
+            <span class="bg-success" :style="`width:${bucketPct(ats,'8_30d')}%`"></span>
+            <span class="bg-surface-strong" :style="`width:${bucketPct(ats,'gt_30d')}%`"></span>
           </div>
-          <p class="text-xs text-text-subtle font-mono">
-            0-1d <span x-text="coverage?.[ats]?.['0_1d'] || 0"></span> ·
-            2-7d <span x-text="coverage?.[ats]?.['2_7d'] || 0"></span> ·
-            8-30d <span x-text="coverage?.[ats]?.['8_30d'] || 0"></span> ·
-            >30d <span x-text="coverage?.[ats]?.gt_30d || 0"></span>
-          </p>
-          <button class="btn btn-ghost btn-sm" @click="openCoverageDetail(ats)">View companies</button>
+
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-text-subtle">
+            <span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full bg-warning"></span>never <span class="tabular text-text" x-text="coverage?.[ats]?.never || 0"></span></span>
+            <span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full bg-info"></span>0-1d <span class="tabular text-text" x-text="coverage?.[ats]?.['0_1d'] || 0"></span></span>
+            <span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full bg-accent"></span>2-7d <span class="tabular text-text" x-text="coverage?.[ats]?.['2_7d'] || 0"></span></span>
+            <span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full bg-success"></span>8-30d <span class="tabular text-text" x-text="coverage?.[ats]?.['8_30d'] || 0"></span></span>
+            <span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full bg-surface-strong"></span>&gt;30d <span class="tabular text-text" x-text="coverage?.[ats]?.gt_30d || 0"></span></span>
+          </div>
+
+          <button class="btn btn-ghost btn-sm w-full justify-center"
+                  @click="openCoverageDetail(ats)">
+            View companies
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
         </div>
       </template>
     </div>
-    <div class="card p-4 space-y-2" x-show="coverageDetailAts" x-cloak>
+
+    <div class="card card-elevated p-4 space-y-3 coverage-detail" x-show="coverageDetailAts" x-cloak>
       <div class="flex items-center justify-between">
-        <h3 class="font-semibold">Coverage detail · <span class="font-mono" x-text="coverageDetailAts"></span></h3>
-        <button class="btn btn-ghost btn-sm" @click="coverageDetailAts = null; coverageRows = [];">Close</button>
+        <h3 class="font-semibold text-sm">Coverage detail · <span class="font-mono text-accent" x-text="coverageDetailAts"></span></h3>
+        <button class="btn btn-ghost btn-sm"
+                @click="coverageDetailAts = null; coverageRows = [];">Close</button>
       </div>
-      <div class="overflow-x-auto max-h-80">
+      <div class="overflow-x-auto max-h-80 -mx-1">
         <table class="w-full text-xs">
           <thead>
-            <tr class="text-text-subtle">
-              <th class="text-left py-1">Company</th>
-              <th class="text-left py-1">Slug</th>
-              <th class="text-left py-1">Last scraped</th>
-              <th class="text-right py-1">S/F</th>
+            <tr class="text-text-subtle border-b border-border-base/60">
+              <th class="text-left py-1.5 px-1 font-medium uppercase tracking-wider text-[10px]">Company</th>
+              <th class="text-left py-1.5 px-1 font-medium uppercase tracking-wider text-[10px]">Slug</th>
+              <th class="text-left py-1.5 px-1 font-medium uppercase tracking-wider text-[10px]">Last scraped</th>
+              <th class="text-right py-1.5 px-1 font-medium uppercase tracking-wider text-[10px]">S / F</th>
             </tr>
           </thead>
           <tbody>
             <template x-for="r in coverageRows" :key="r.slug">
-              <tr class="border-t border-border-base/40">
-                <td class="py-1" x-text="r.name || '—'"></td>
-                <td class="py-1 font-mono" x-text="r.slug"></td>
-                <td class="py-1" x-text="r.last_scraped_at ? fmtTime(r.last_scraped_at) : 'never'"></td>
-                <td class="py-1 text-right tabular"><span x-text="fmtNum(r.success_count)"></span>/<span x-text="fmtNum(r.failure_count)"></span></td>
+              <tr class="border-t border-border-base/40 hover:bg-surface-muted/40">
+                <td class="py-1.5 px-1" x-text="r.name || '—'"></td>
+                <td class="py-1.5 px-1 font-mono text-text-subtle" x-text="r.slug"></td>
+                <td class="py-1.5 px-1 text-text-muted" x-text="r.last_scraped_at ? fmtTime(r.last_scraped_at) : 'never'"></td>
+                <td class="py-1.5 px-1 text-right tabular">
+                  <span class="text-success" x-text="fmtNum(r.success_count)"></span>
+                  <span class="text-text-subtle">/</span>
+                  <span class="text-danger" x-text="fmtNum(r.failure_count)"></span>
+                </td>
               </tr>
             </template>
           </tbody>
@@ -192,68 +307,122 @@
     </div>
   </section>
 
-  {# ====== Panel B: Live run ====== #}
-  <section class="space-y-3" x-show="activeRunId" x-cloak>
-    <div class="flex items-center justify-between">
-      <h2 class="text-xl font-semibold">Run #<span x-text="activeRunId"></span> · live</h2>
-      <div class="flex items-center gap-3">
-        <span class="text-sm text-text-muted">elapsed <span class="tabular font-medium" x-text="fmtElapsed(elapsedMs)"></span></span>
-        <button class="btn btn-secondary btn-sm" @click="cancel()">Cancel</button>
+  {# ====== Live run ====== #}
+  <section class="space-y-4" x-show="activeRunId" x-cloak>
+    <div class="card card-elevated live-banner p-4 flex flex-wrap items-center gap-4 sticky top-16 z-20 backdrop-blur-xl bg-surface/85">
+      <div class="flex items-center gap-3 min-w-0">
+        <span class="live-dot"></span>
+        <div class="min-w-0">
+          <p class="text-xs text-text-subtle uppercase tracking-wider">Live run</p>
+          <p class="font-mono font-medium text-sm truncate">
+            #<span x-text="activeRunId"></span>
+            <span class="text-text-subtle"> · </span>
+            <span class="tabular" x-text="fmtElapsed(elapsedMs)"></span>
+          </p>
+        </div>
+      </div>
+      <div class="ml-auto flex items-center gap-2">
+        <a :href="`/scrape/runs/${activeRunId}`" class="btn btn-ghost btn-sm">Open detail</a>
+        <button class="btn btn-secondary btn-sm" @click="cancel()">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+          Cancel
+        </button>
       </div>
     </div>
     <p x-show="cancelError" x-cloak class="text-xs text-danger" x-text="cancelError"></p>
 
-    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+    {# Hero counters across the run #}
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 live-stats">
+      <div class="card p-4">
+        <p class="stat-eyebrow">Companies done</p>
+        <p class="stat-hero mt-1">
+          <span x-text="fmtNum(liveTotals().completed)"></span>
+          <span class="text-text-subtle text-base font-normal">/ <span x-text="fmtNum(liveTotals().total)"></span></span>
+        </p>
+        <div class="mt-2 progress-bar">
+          <div class="progress-fill" :style="`width:${pct(liveTotals().completed, liveTotals().total)}%`"></div>
+        </div>
+      </div>
+      <div class="card p-4">
+        <p class="stat-eyebrow">Scraped</p>
+        <p class="stat-hero mt-1 text-accent" x-text="fmtNum(liveTotals().scraped)"></p>
+        <p class="text-xs text-text-subtle mt-2">jobs returned</p>
+      </div>
+      <div class="card p-4">
+        <p class="stat-eyebrow">Written</p>
+        <p class="stat-hero mt-1" x-text="fmtNum(liveTotals().written)"></p>
+        <p class="text-xs text-text-subtle mt-2">
+          <span x-text="fmtNum(liveTotals().inserted)"></span> new ·
+          <span x-text="fmtNum(liveTotals().updated)"></span> updated
+        </p>
+      </div>
+      <div class="card p-4">
+        <p class="stat-eyebrow">Failures</p>
+        <p class="stat-hero mt-1" :class="liveTotals().failed > 0 ? 'text-danger' : 'text-text-subtle'"
+           x-text="fmtNum(liveTotals().failed)"></p>
+        <p class="text-xs text-text-subtle mt-2">companies errored</p>
+      </div>
+    </div>
+
+    {# Per-ATS detail strips #}
+    <div class="grid sm:grid-cols-2 gap-3 live-ats-grid">
       <template x-for="ats in selectedList()" :key="ats">
         <div class="card p-4 space-y-3">
-          <div class="flex items-center justify-between">
-            <h3 class="font-semibold text-base" x-text="ats"></h3>
-            <span :class="statusClass(perAts[ats]?.status || 'pending')" x-text="perAts[ats]?.status || 'pending'"></span>
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2 min-w-0">
+              <h3 class="font-semibold" x-text="ats"></h3>
+              <span :class="statusClass(perAts[ats]?.status || 'pending')"
+                    x-text="perAts[ats]?.status || 'pending'"></span>
+            </div>
+            <p class="text-xs text-text-subtle font-mono shrink-0">
+              <span x-text="perAts[ats]?.phase || 'pending'"></span>
+              <span x-show="perAts[ats]?.eta_seconds != null">
+                · eta <span class="tabular" x-text="fmtEta(perAts[ats]?.eta_seconds)"></span>
+              </span>
+            </p>
           </div>
-          <p class="text-xs text-text-subtle">phase <span class="font-mono" x-text="perAts[ats]?.phase || 'pending'"></span> · eta <span x-text="fmtEta(perAts[ats]?.eta_seconds)"></span></p>
 
-          {# Progress bar — companies #}
-          <div class="space-y-1">
-            <div class="flex justify-between text-xs text-text-muted">
+          <div>
+            <div class="flex justify-between text-xs text-text-muted mb-1">
               <span>companies</span>
               <span class="tabular">
-                <span x-text="fmtNum(perAts[ats]?.companies_succeeded || 0)"></span>
+                <span class="text-text font-medium" x-text="fmtNum(perAts[ats]?.companies_succeeded || 0)"></span>
                 <span class="text-text-subtle">/ <span x-text="fmtNum(perAts[ats]?.companies_total || 0)"></span></span>
+                <template x-if="(perAts[ats]?.companies_failed || 0) > 0">
+                  <span class="text-danger ml-1">· <span x-text="perAts[ats]?.companies_failed"></span> failed</span>
+                </template>
               </span>
             </div>
-            <div class="h-1.5 rounded-full bg-surface-muted overflow-hidden">
-              <div class="h-full bg-accent transition-all"
-                   :style="`width: ${pct((perAts[ats]?.companies_succeeded || 0) + (perAts[ats]?.companies_failed || 0), perAts[ats]?.companies_total || 0)}%`">
-              </div>
+            <div class="progress-bar">
+              <div class="progress-fill"
+                   :style="`width: ${pct((perAts[ats]?.companies_succeeded || 0) + (perAts[ats]?.companies_failed || 0), perAts[ats]?.companies_total || 0)}%`"></div>
+              <div class="progress-fail"
+                   :style="`width: ${pct(perAts[ats]?.companies_failed || 0, perAts[ats]?.companies_total || 0)}%`"></div>
             </div>
           </div>
 
-          {# Three counters — scraped, failed, written #}
-          <div class="grid grid-cols-4 gap-2 pt-1">
+          <div class="grid grid-cols-3 gap-2 pt-1">
             <div>
-              <p class="text-xs text-text-subtle">scraped</p>
+              <p class="stat-eyebrow">Scraped</p>
               <p class="text-lg font-semibold tabular" x-text="fmtNum(perAts[ats]?.rows_scraped || 0)"></p>
             </div>
             <div>
-              <p class="text-xs text-text-subtle">failed</p>
-              <p class="text-lg font-semibold tabular text-danger" x-text="fmtNum(perAts[ats]?.companies_failed || 0)"></p>
-            </div>
-            <div>
-              <p class="text-xs text-text-subtle">written</p>
+              <p class="stat-eyebrow">Written</p>
               <p class="text-lg font-semibold tabular" x-text="fmtNum(perAts[ats]?.rows_written || 0)"></p>
             </div>
             <div>
-              <p class="text-xs text-text-subtle">I / U</p>
+              <p class="stat-eyebrow">I / U</p>
               <p class="text-lg font-semibold tabular">
-                <span x-text="fmtNum(perAts[ats]?.rows_inserted || 0)"></span> / <span x-text="fmtNum(perAts[ats]?.rows_updated || 0)"></span>
+                <span x-text="fmtNum(perAts[ats]?.rows_inserted || 0)"></span>
+                <span class="text-text-subtle">/</span>
+                <span x-text="fmtNum(perAts[ats]?.rows_updated || 0)"></span>
               </p>
             </div>
           </div>
 
-          {# Last event (debug-style ticker) #}
-          <div class="text-xs text-text-subtle border-t border-border-base/60 pt-2 font-mono break-all"
+          <div class="text-xs text-text-subtle border-t border-border-base/60 pt-2 font-mono break-all min-h-[1.25rem]"
                x-show="perAts[ats]?.last_event" x-cloak>
-            <span x-text="perAts[ats]?.last_event?.event || ''"></span>
+            <span class="text-accent" x-text="perAts[ats]?.last_event?.event || ''"></span>
             <template x-if="perAts[ats]?.last_event?.slug">
               <span> · <span x-text="perAts[ats]?.last_event?.slug"></span></span>
             </template>
@@ -266,57 +435,78 @@
     </div>
   </section>
 
-  {# ====== Panel C: Recent runs (history) ====== #}
-  <section class="space-y-3">
+  {# ====== Recent runs ====== #}
+  <section class="space-y-3 runs-section" id="runs">
     <div class="flex items-center justify-between">
       <h2 class="text-xl font-semibold">Recent runs</h2>
-      <button class="btn btn-ghost btn-sm" @click="fetchRuns()" title="Refresh">↻ Refresh</button>
+      <button class="btn btn-ghost btn-sm" @click="fetchRuns()" title="Refresh">
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15A9 9 0 1 1 18 6"/></svg>
+        Refresh
+      </button>
     </div>
 
-    <div x-show="!runs.length && !runsError" x-cloak class="card p-6 text-center text-text-subtle">
-      No scrape runs yet. Pick ATS above and hit Start.
+    <div x-show="!runs.length && !runsError" x-cloak class="card p-10 text-center runs-empty">
+      <p class="text-text-subtle">No scrape runs yet.</p>
+      <p class="text-xs text-text-subtle mt-1">Pick ATS above and hit Start.</p>
     </div>
 
-    <div x-show="runs.length" x-cloak class="card overflow-hidden">
-      <table class="w-full text-sm">
-        <thead class="border-b border-border-base bg-surface-muted">
-          <tr class="text-left text-text-subtle">
-            <th class="px-3 py-2 font-medium">Run</th>
-            <th class="px-3 py-2 font-medium">Started</th>
-            <th class="px-3 py-2 font-medium">Duration</th>
-            <th class="px-3 py-2 font-medium">ATS</th>
-            <th class="px-3 py-2 font-medium">Status</th>
-            <th class="px-3 py-2 font-medium text-right">Scraped</th>
-            <th class="px-3 py-2 font-medium text-right">Written</th>
-            <th class="px-3 py-2 font-medium text-right">I / U</th>
-            <th class="px-3 py-2 font-medium">Trigger</th>
-          </tr>
-        </thead>
-        <tbody>
-          <template x-for="r in runs" :key="r.id">
-            <tr class="border-b border-border-base/60 hover:bg-surface-muted/40 cursor-pointer"
-                @click="window.location = `/scrape/runs/${r.id}`">
-              <td class="px-3 py-2 font-mono">#<span x-text="r.id"></span></td>
-              <td class="px-3 py-2 text-text-muted" x-text="fmtTime(r.started_at)"></td>
-              <td class="px-3 py-2 tabular text-text-muted" x-text="fmtDuration(r.started_at, r.finished_at)"></td>
-              <td class="px-3 py-2 text-text-muted">
-                <span class="font-mono" x-text="(r.ats_requested || []).join(', ')"></span>
-              </td>
-              <td class="px-3 py-2">
-                <span :class="statusClass(r.status)" x-text="r.status"></span>
-                <span x-show="r.live" x-cloak class="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-accent animate-pulse"></span>
-              </td>
-              <td class="px-3 py-2 text-right tabular" x-text="fmtNum(r.total_scraped)"></td>
-              <td class="px-3 py-2 text-right tabular" x-text="fmtNum(r.total_written)"></td>
-              <td class="px-3 py-2 text-right tabular"><span x-text="fmtNum(r.total_inserted)"></span> / <span x-text="fmtNum(r.total_updated)"></span></td>
-              <td class="px-3 py-2 text-text-subtle text-xs font-mono" x-text="r.triggered_by"></td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
+    <div x-show="runs.length" x-cloak class="space-y-2 runs-list">
+      <template x-for="r in runs" :key="r.id">
+        <a :href="`/scrape/runs/${r.id}`"
+           class="card card-interactive run-row block p-4">
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div class="flex items-center gap-3 min-w-0 flex-1">
+              <span class="grid place-items-center h-9 w-9 rounded-full bg-surface-muted text-xs font-mono text-text-muted">
+                #<span x-text="r.id"></span>
+              </span>
+              <div class="min-w-0">
+                <p class="text-sm font-medium truncate">
+                  <span x-text="fmtTime(r.started_at)"></span>
+                </p>
+                <p class="text-xs text-text-subtle">
+                  <span class="tabular" x-text="fmtDuration(r.started_at, r.finished_at)"></span>
+                  · <span class="font-mono" x-text="r.triggered_by"></span>
+                </p>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap gap-1 max-w-xs">
+              <template x-for="a in (r.ats_requested || []).slice(0, 5)" :key="a">
+                <span class="badge font-mono text-[10px]" x-text="a"></span>
+              </template>
+              <span class="badge text-[10px]" x-show="(r.ats_requested || []).length > 5"
+                    x-text="`+${(r.ats_requested || []).length - 5}`"></span>
+            </div>
+
+            <div class="flex items-center gap-5 tabular">
+              <div class="text-right">
+                <p class="stat-eyebrow">Scraped</p>
+                <p class="text-sm font-semibold" x-text="fmtNum(r.total_scraped)"></p>
+              </div>
+              <div class="text-right">
+                <p class="stat-eyebrow">Written</p>
+                <p class="text-sm font-semibold" x-text="fmtNum(r.total_written)"></p>
+              </div>
+              <div class="text-right">
+                <p class="stat-eyebrow">I / U</p>
+                <p class="text-sm font-semibold">
+                  <span x-text="fmtNum(r.total_inserted)"></span>
+                  <span class="text-text-subtle">/</span>
+                  <span x-text="fmtNum(r.total_updated)"></span>
+                </p>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <span :class="statusClass(r.status)" x-text="r.status"></span>
+              <span x-show="r.live" x-cloak class="live-dot" title="live"></span>
+            </div>
+          </div>
+        </a>
+      </template>
     </div>
 
-    <div x-show="runsError" x-cloak class="text-sm text-danger" x-text="runsError"></div>
+    <p x-show="runsError" x-cloak class="text-sm text-danger" x-text="runsError"></p>
   </section>
 
 </div>

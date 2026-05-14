@@ -346,6 +346,187 @@
     overflow-y: auto;
   }
 
+  /* ---- Premium scrape-page primitives ---------------------- */
+
+  /* Big number used for hero stat blocks. Pairs with .stat-eyebrow. */
+  .stat-hero {
+    font-family: var(--font-sans);
+    font-size: clamp(1.875rem, 1.5rem + 1.5vw, 2.5rem);
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat-eyebrow {
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    color: hsl(var(--text-subtle));
+  }
+
+  /* Tile — chunky toggle used for ATS picker. Selected state lights
+   * a left rail; hover lifts slightly. */
+  .tile {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.625rem;
+    padding: 0.625rem 0.875rem 0.625rem 1rem;
+    background-color: hsl(var(--surface-elevated) / 0.6);
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1.2;
+    color: hsl(var(--text));
+    cursor: pointer;
+    transition: background-color 140ms ease, border-color 140ms ease,
+                transform 140ms ease, box-shadow 140ms ease;
+    user-select: none;
+    overflow: hidden;
+  }
+
+  .tile::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background-color: transparent;
+    transition: background-color 140ms ease;
+  }
+
+  .tile:hover:not(:disabled):not([data-locked]) {
+    border-color: hsl(var(--border-strong));
+    background-color: hsl(var(--surface-elevated) / 0.85);
+    transform: translateY(-1px);
+  }
+
+  .tile[aria-pressed="true"] {
+    background-color: hsl(var(--accent) / 0.10);
+    border-color: hsl(var(--accent) / 0.45);
+    color: hsl(var(--accent));
+    box-shadow: 0 6px 16px -10px hsl(var(--accent) / 0.6);
+  }
+
+  .tile[aria-pressed="true"]::before {
+    background-color: hsl(var(--accent));
+  }
+
+  .tile:disabled,
+  .tile[data-locked] {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .tile-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background-color: hsl(var(--text-subtle));
+    flex-shrink: 0;
+  }
+  .tile-dot.tile-dot-ok    { background-color: hsl(var(--success)); }
+  .tile-dot.tile-dot-warn  { background-color: hsl(var(--warning)); }
+  .tile-dot.tile-dot-stale { background-color: hsl(var(--danger)); }
+
+  /* Segmented progress bar — coverage buckets. Soft gaps, rounded
+   * caps; segments render zero-width when their value is 0. */
+  .segment-bar {
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+    height: 8px;
+    border-radius: 9999px;
+    overflow: hidden;
+    background-color: hsl(var(--surface-muted));
+    padding: 1px;
+  }
+
+  .segment-bar > span {
+    display: block;
+    height: 100%;
+    border-radius: 9999px;
+    transition: width 220ms ease;
+  }
+
+  /* Glow halo for the primary CTA — subtle radial behind the button. */
+  .btn-primary-hero {
+    position: relative;
+  }
+  .btn-primary-hero::after {
+    content: "";
+    position: absolute;
+    inset: -10px -16px;
+    border-radius: 9999px;
+    background: radial-gradient(60% 60% at 50% 50%,
+                hsl(var(--accent) / 0.32), transparent 70%);
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.75;
+    filter: blur(8px);
+  }
+  .btn-primary-hero:disabled::after { opacity: 0; }
+
+  /* Live status indicator — animated pulsing dot with a softer ring. */
+  .live-dot {
+    position: relative;
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 9999px;
+    background-color: hsl(var(--accent));
+  }
+  .live-dot::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 9999px;
+    background-color: hsl(var(--accent) / 0.35);
+    animation: live-pulse 1.6s ease-out infinite;
+  }
+  @keyframes live-pulse {
+    0%   { transform: scale(0.6); opacity: 0.9; }
+    100% { transform: scale(1.6); opacity: 0;   }
+  }
+
+  /* Mini progress bar used inside per-ATS cards. */
+  .progress-bar {
+    height: 6px;
+    border-radius: 9999px;
+    background-color: hsl(var(--surface-muted));
+    overflow: hidden;
+    position: relative;
+  }
+  .progress-bar > .progress-fill {
+    height: 100%;
+    background-image: linear-gradient(90deg,
+                       hsl(var(--accent) / 0.85),
+                       hsl(var(--accent)));
+    border-radius: 9999px;
+    transition: width 280ms ease;
+  }
+  .progress-bar > .progress-fail {
+    position: absolute;
+    top: 0; right: 0; height: 100%;
+    background-color: hsl(var(--danger) / 0.65);
+    border-top-right-radius: 9999px;
+    border-bottom-right-radius: 9999px;
+    transition: width 280ms ease;
+  }
+
+  /* Subtle dotted leader between label and value (used in summary list) */
+  .leader {
+    flex: 1;
+    border-bottom: 1px dotted hsl(var(--border));
+    margin: 0 0.5rem 0.25rem 0.5rem;
+    min-width: 1.5rem;
+  }
+
   /* Pill — like badge but bigger, used for status indicators */
   .pill {
     display: inline-flex;
@@ -367,6 +548,208 @@
     height: 6px;
     border-radius: 9999px;
     background-color: hsl(var(--success));
+  }
+
+  /* ---- Scrape / Run redesign -------------------------------- */
+  .scrape-shell,
+  .run-shell {
+    position: relative;
+    isolation: isolate;
+    padding-bottom: 1rem;
+  }
+
+  .scrape-shell::before,
+  .run-shell::before {
+    content: "";
+    position: absolute;
+    inset: -1.25rem -0.5rem auto;
+    height: 16rem;
+    z-index: -1;
+    border-radius: calc(var(--radius-lg) + 0.5rem);
+    background:
+      linear-gradient(120deg, hsl(var(--accent) / 0.16), transparent 55%),
+      linear-gradient(20deg, hsl(var(--info) / 0.14), transparent 60%),
+      hsl(var(--surface-elevated) / 0.5);
+    border: 1px solid hsl(var(--border) / 0.65);
+    box-shadow: var(--shadow-lg);
+    pointer-events: none;
+  }
+
+  .scrape-hero,
+  .run-hero {
+    padding: 1rem 1.125rem;
+    border: 1px solid hsl(var(--border) / 0.75);
+    border-radius: var(--radius-lg);
+    background: linear-gradient(180deg, hsl(var(--surface-elevated) / 0.9), hsl(var(--surface)));
+    box-shadow: var(--shadow);
+    animation: reveal-up 420ms cubic-bezier(.2,.7,.2,1) both;
+  }
+
+  .run-hero {
+    background:
+      radial-gradient(55rem 20rem at 0% 0%, hsl(var(--accent) / 0.12), transparent 60%),
+      linear-gradient(180deg, hsl(var(--surface-elevated) / 0.9), hsl(var(--surface)));
+  }
+
+  .scrape-hero-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) auto;
+    align-items: start;
+    gap: 1rem 1.25rem;
+    padding: 1.25rem;
+  }
+
+  .scrape-hero-layout > div:first-child {
+    display: grid;
+    gap: 0.35rem;
+    max-width: 64ch;
+  }
+
+  .scrape-hero-layout > div:last-child {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem;
+    border: 1px solid hsl(var(--border) / 0.8);
+    border-radius: var(--radius-pill);
+    background: hsl(var(--surface));
+  }
+
+  .command-deck {
+    border-color: hsl(var(--border-strong) / 0.8);
+    background:
+      linear-gradient(150deg, hsl(var(--surface-elevated)), hsl(var(--surface)));
+    box-shadow: var(--shadow-lg);
+  }
+
+  .coverage-grid > .card,
+  .live-stats > .card,
+  .live-ats-grid > .card,
+  .run-stats-grid > .card {
+    background:
+      linear-gradient(165deg, hsl(var(--surface-elevated) / 0.96), hsl(var(--surface)));
+    border-color: hsl(var(--border) / 0.8);
+  }
+
+  .coverage-grid > .card:hover,
+  .live-ats-grid > .card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow);
+  }
+
+  .live-banner {
+    border-color: hsl(var(--accent) / 0.45);
+    background:
+      linear-gradient(120deg, hsl(var(--accent) / 0.15), transparent 50%),
+      hsl(var(--surface-elevated) / 0.92) !important;
+  }
+
+  .runs-section {
+    border: 1px solid hsl(var(--border) / 0.75);
+    border-radius: var(--radius-lg);
+    padding: 1rem;
+    background: hsl(var(--surface-elevated) / 0.55);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .runs-list .card {
+    border-radius: calc(var(--radius) + 0.25rem);
+    border-color: hsl(var(--border));
+    background: hsl(var(--surface-elevated));
+  }
+
+  .runs-list .run-row {
+    padding: 0.875rem 1rem;
+    border-radius: 0.75rem;
+    border-left: 4px solid transparent;
+    transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
+  }
+
+  .runs-list .run-row:hover {
+    border-left-color: hsl(var(--accent));
+    background-color: hsl(var(--surface-muted) / 0.65);
+    transform: translateX(2px);
+  }
+
+  .runs-list .card:hover {
+    border-color: hsl(var(--border-strong));
+    box-shadow: var(--shadow);
+  }
+
+  .runs-empty {
+    background:
+      radial-gradient(14rem 8rem at 50% 0%, hsl(var(--accent) / 0.1), transparent 70%),
+      hsl(var(--surface));
+  }
+
+  .coverage-detail {
+    animation: reveal-up 320ms ease both;
+  }
+
+  .run-detail-list > .card {
+    border-color: hsl(var(--border-strong) / 0.65);
+    box-shadow: var(--shadow);
+  }
+
+  .run-detail-list > .card > div:first-child {
+    background:
+      linear-gradient(180deg, hsl(var(--surface-elevated)), hsl(var(--surface)));
+  }
+
+  .tile {
+    border-radius: 0.7rem;
+    background:
+      linear-gradient(180deg, hsl(var(--surface-elevated) / 0.82), hsl(var(--surface)));
+  }
+
+  .tile[aria-pressed="true"] {
+    background:
+      linear-gradient(180deg, hsl(var(--accent) / 0.18), hsl(var(--accent) / 0.08));
+  }
+
+  .progress-bar {
+    height: 8px;
+    background-color: hsl(var(--surface-muted) / 0.8);
+  }
+
+  .segment-bar {
+    height: 9px;
+  }
+
+  @keyframes reveal-up {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.995);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @media (max-width: 768px) {
+    .scrape-shell::before,
+    .run-shell::before {
+      height: 11rem;
+      inset-inline: 0;
+    }
+
+    .scrape-hero,
+    .run-hero {
+      padding: 0.875rem;
+    }
+
+    .scrape-hero-layout {
+      grid-template-columns: 1fr;
+      gap: 0.875rem;
+      padding: 0.875rem;
+    }
+
+    .scrape-hero-layout > div:last-child {
+      justify-content: flex-start;
+    }
   }
 
   .font-mono,
