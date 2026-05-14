@@ -161,9 +161,9 @@ function dashboard() {
       this.filters.country.forEach(c =>
         chips.push({ label: `country: ${c}`, key: "country", value: c }));
       this.filters.ats.forEach(a =>
-        chips.push({ label: `ats: ${a}`, key: "ats", value: a }));
+        chips.push({ label: `ats: ${this.facetLabel("ats", a)}`, key: "ats", value: a }));
       this.filters.employment_type.forEach(e =>
-        chips.push({ label: e, key: "employment_type", value: e }));
+        chips.push({ label: this.facetLabel("employment_type", e), key: "employment_type", value: e }));
       if (this.filters.remote === true)  chips.push({ label: "remote only", key: "remote" });
       if (this.filters.remote === false) chips.push({ label: "on-site only", key: "remote" });
       if (this.filters.salary_min_usd) {
@@ -280,11 +280,26 @@ function dashboard() {
       return fmt(max || min);
     },
 
+    parseUtcIso(iso) {
+      // Server returns SQLite-format "YYYY-MM-DD HH:MM:SS" (no TZ marker, UTC)
+      // and ISO-like "YYYY-MM-DDTHH:MM:SS" from upstream. Both lack a timezone
+      // indicator, so naive `new Date(iso)` parses them as LOCAL time — which
+      // shifts a UTC timestamp by the local offset and produces nonsense like
+      // "-335s ago" for a row first seen seconds ago. Normalize to T-separated
+      // with a trailing Z so JS parses as UTC.
+      if (!iso) return null;
+      let s = String(iso).replace(" ", "T");
+      if (!/[Zz]|[+-]\d{2}:?\d{2}$/.test(s)) s += "Z";
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? null : d;
+    },
+
     formatTimeAgo(iso) {
-      if (!iso) return "—";
-      const ts = new Date(iso);
-      if (isNaN(ts.getTime())) return "—";
-      const secs = Math.floor((Date.now() - ts.getTime()) / 1000);
+      const ts = this.parseUtcIso(iso);
+      if (!ts) return "—";
+      // Clamp tiny negative skew (clock jitter between server and client) to 0
+      // so we never show "-3s ago".
+      const secs = Math.max(0, Math.floor((Date.now() - ts.getTime()) / 1000));
       if (secs < 60)     return `${secs}s ago`;
       if (secs < 3600)   return `${Math.floor(secs / 60)}m ago`;
       if (secs < 86400)  return `${Math.floor(secs / 3600)}h ago`;
@@ -306,10 +321,90 @@ function dashboard() {
       return loc || "—";
     },
 
+    isFresh(job) {
+      // True when effective date is within the last 24h. Drives the small
+      // accent dot before the card title.
+      const date = job.posted_at || job.first_seen_at;
+      const ts = this.parseUtcIso(date);
+      if (!ts) return false;
+      return Date.now() - ts.getTime() < 24 * 3600 * 1000;
+    },
+
+    cardPrimaryMeta(job) {
+      // Salary → department → fallback. Returns text + a "kind" so the
+      // template can switch typography (mono+strong for salary, muted
+      // sans for department/fallback).
+      const min = job.salary_min_usd_annual;
+      const max = job.salary_max_usd_annual;
+      if (min != null || max != null) {
+        return { text: this.formatSalary(job), kind: "salary" };
+      }
+      if (job.salary_summary) {
+        return { text: job.salary_summary, kind: "salary" };
+      }
+      if (job.department) {
+        return { text: job.department, kind: "department" };
+      }
+      return { text: "Salary not disclosed", kind: "muted" };
+    },
+
     facetLabel(name, value) {
+      const COUNTRY_LABELS = {
+        US: "United States",
+        IN: "India",
+        EU: "European Union",
+        GB: "United Kingdom",
+        CA: "Canada",
+        CH: "Switzerland",
+        IL: "Israel",
+      };
       if (name === "remote") return value ? "Remote" : "On-site";
+      if (name === "country") {
+        if (value === null || value === "") return "Rest of World";
+        return COUNTRY_LABELS[value] || value;
+      }
+      if (name === "employment_type") {
+        // Unknowns are visually merged into Fulltime (see employmentFacetRows).
+        if (value === null || value === "") return "Fulltime";
+        const cleaned = String(value).replace(/_/g, "").toLowerCase();
+        return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+      }
+      if (name === "ats") {
+        if (value === null || value === "") return "—";
+        const cleaned = String(value).replace(/_/g, "").toLowerCase();
+        return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+      }
       if (value === null || value === "") return "—";
       return value;
+    },
+
+    countryFacetRows() {
+      const priority = ["US", "IN", "EU", "GB", "CA", "CH", "IL"];
+      const byCode = new Map((this.facets.country || []).map(r => [r.value, r]));
+      const pinned = priority.map(code => byCode.get(code) || { value: code, count: 0 });
+      const rest = (this.facets.country || []).filter(r => !priority.includes(r.value));
+      return [...pinned, ...rest].slice(0, 20);
+    },
+
+    employmentFacetRows() {
+      // Fold the null/empty "unknown" row into FULL_TIME so the sidebar
+      // doesn't show a separate "—" bucket. Display-only: filter behavior
+      // is unchanged (clicking Fulltime still filters server-side by
+      // employment_type=FULL_TIME).
+      const rows = this.facets.employment_type || [];
+      const unknownCount = rows
+        .filter(r => r.value === null || r.value === "")
+        .reduce((s, r) => s + r.count, 0);
+      const visible = rows.filter(r => r.value !== null && r.value !== "");
+      if (unknownCount > 0) {
+        const ft = visible.find(r => r.value === "FULL_TIME");
+        if (ft) {
+          ft.count += unknownCount;
+        } else {
+          visible.unshift({ value: "FULL_TIME", count: unknownCount });
+        }
+      }
+      return visible.slice(0, 8);
     },
 
     /* ---- multi-select helpers --------------------------- */

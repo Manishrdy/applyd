@@ -75,8 +75,12 @@ function settingsPage() {
     },
 
     fmtTime(iso) {
+      // SQLite emits "YYYY-MM-DD HH:MM:SS" (UTC, no TZ marker). Normalize to
+      // T-separated + Z so JS parses as UTC then renders in local time.
       if (!iso) return "—";
-      const d = new Date(iso);
+      let s = String(iso).replace(" ", "T");
+      if (!/[Zz]|[+-]\d{2}:?\d{2}$/.test(s)) s += "Z";
+      const d = new Date(s);
       if (isNaN(d.getTime())) return iso;
       return d.toLocaleString();
     },

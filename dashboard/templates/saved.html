@@ -15,7 +15,7 @@
   <header class="space-y-2">
     <h1 class="text-3xl font-semibold tracking-tight">Saved jobs</h1>
     <p class="text-text-muted text-pretty">
-      Your queue for the MS2 auto-apply agent. Cycle status with the badge, remove with the × button, click a card to open the listing.
+      Your queue for the auto-apply agent. Cycle status with the badge, remove with the × button, click a card to open the listing.
     </p>
   </header>
 
@@ -65,7 +65,7 @@
         <span x-show="statusTab !== 'all'">No <span x-text="statusTab"></span> jobs</span>
       </h3>
       <p class="text-text-muted text-sm">
-        <span x-show="statusTab === 'all'">Click the bookmark icon on any job card to queue it for MS2.</span>
+        <span x-show="statusTab === 'all'">Click the bookmark icon on any job card to queue it for auto-apply.</span>
         <span x-show="statusTab !== 'all'">Try a different status tab.</span>
       </p>
     </div>
@@ -114,7 +114,7 @@
                         @keydown.meta.enter="saveNotes(item, draft); editing = false"
                         @keydown.ctrl.enter="saveNotes(item, draft); editing = false"
                         @blur="saveNotes(item, draft); editing = false"
-                        placeholder="Notes for MS2 (cmd+enter to save, esc to cancel)…"
+                        placeholder="Notes for auto-apply (cmd+enter to save, esc to cancel)…"
                         class="input w-full text-xs"></textarea>
             </template>
           </div>

@@ -39,8 +39,24 @@ log = logging.getLogger(__name__)
 # ATS sources expose location as just the city (e.g. Apple: "Sunnyvale").
 # We exclude rows where location explicitly contains a non-US country.
 
+# Shared boundary guards — see definition note below. Foreign country/city
+# names must start the string OR follow a comma, AND must not be immediately
+# followed by a US street/place suffix or a US-state-code comma.
+_LOC_BOUNDARY_PREFIX = r"(?:^|,\s*)"
+_LOC_BOUNDARY_GUARD = (
+    r"(?!\s+(?:Avenue|Ave|Street|St|Road|Rd|Drive|Dr|Lane|Ln|"
+    r"Boulevard|Blvd|Way|Place|Pl|Court|Ct|Highway|Hwy|Parkway|Pkwy|"
+    r"Circle|Cir|Square|Sq|Plaza|Center|Centre|Terrace|Ter|Trail|"
+    r"County|District|Township|Borough|Park|Beach|Heights|Hills|"
+    r"Junction|Corner|Ridge|Village|Town|City|Bridge|Health|Hospital|"
+    r"Medical|University|College|School|Campus)\b)"
+    r"(?!\s*,\s*(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|"
+    r"KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|"
+    r"OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)\b)"
+)
+
 _NON_US_COUNTRY_RE = re.compile(
-    r"\b(United Kingdom|UK|England|Scotland|Wales|Ireland|"
+    rf"{_LOC_BOUNDARY_PREFIX}(?:United Kingdom|UK|England|Scotland|Wales|Ireland|"
     r"Germany|France|Spain|Italy|Netherlands|Belgium|Switzerland|Austria|"
     r"Sweden|Norway|Denmark|Finland|Poland|Portugal|Greece|Czechia|Romania|"
     r"India|China|Japan|Korea|Singapore|Hong Kong|Taiwan|Thailand|Vietnam|"
@@ -52,7 +68,7 @@ _NON_US_COUNTRY_RE = re.compile(
     r"Mumbai|Bangalore|Bengaluru|Delhi|Hyderabad|Pune|Chennai|Gurgaon|Noida|"
     r"Beijing|Shanghai|Shenzhen|Tokyo|Osaka|Seoul|Sydney|Melbourne|"
     r"São Paulo|Sao Paulo|Mexico City|Buenos Aires|Tel Aviv|Dubai|UAE|"
-    r"Remote - EMEA|Remote - APAC|Remote - EU)\b",
+    rf"Remote - EMEA|Remote - APAC|Remote - EU)\b{_LOC_BOUNDARY_GUARD}",
     re.IGNORECASE,
 )
 
@@ -180,7 +196,203 @@ _USA_CITY_RE = re.compile(
     re.IGNORECASE,
 )
 
+_INDIA_EXPLICIT_RE = re.compile(
+    rf"{_LOC_BOUNDARY_PREFIX}(?:India|Bharat)\b{_LOC_BOUNDARY_GUARD}",
+    re.IGNORECASE,
+)
+
+# Trailing 3-part ISO form: "Bangalore, KA, IN". Mirrors
+# _NON_US_TRAILING_CC_RE so India and Indiana don't collide.
+_INDIA_TRAILING_CC_RE = re.compile(
+    r",\s*[A-Z][A-Za-z]{0,4},\s*IN\s*$"
+)
+
+_INDIA_CITY_RE = re.compile(
+    r"\b("
+    r"Bengaluru|Bangalore|Mumbai|Delhi|New Delhi|Hyderabad|Pune|Chennai|"
+    r"Gurugram|Gurgaon|Noida|Kolkata|Ahmedabad|Jaipur|Kochi|Coimbatore|"
+    r"Thiruvananthapuram|Trivandrum|Indore|Nagpur|Surat|Vadodara"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_EU_EXPLICIT_RE = re.compile(
+    r"\b(?:European Union|EU|EMEA|Remote - EU|Remote - EMEA)\b",
+    re.IGNORECASE,
+)
+
+_EU_COUNTRY_RE = re.compile(
+    rf"{_LOC_BOUNDARY_PREFIX}(?:"
+    r"Germany|France|Spain|Italy|Netherlands|Belgium|Sweden|Austria|"
+    r"Denmark|Finland|Ireland|Portugal|Poland|Czechia|Czech Republic|"
+    r"Romania|Hungary|Greece|Croatia|Slovakia|Slovenia|Bulgaria|"
+    r"Lithuania|Latvia|Estonia|Luxembourg|Malta|Cyprus"
+    rf")\b{_LOC_BOUNDARY_GUARD}",
+    re.IGNORECASE,
+)
+
+# Native-language country names that appear in raw ATS location strings
+# (e.g. SAP/Workday surface "Berlin, Berlin, Deutschland", "Madrid, España").
+# These are unambiguous — no US locality uses these spellings.
+_EU_NATIVE_RE = re.compile(
+    rf"{_LOC_BOUNDARY_PREFIX}(?:Deutschland|Österreich|Oesterreich|Nederland|Belgique|België|"
+    r"Belgie|Italia|España|Espana|Suomi|Sverige|Danmark|Polska|Česko|"
+    r"Cesko|Magyarország|Magyarorszag|România|Romania|Hrvatska|Slovenija|"
+    rf"Slovensko|Ελλάδα|Ellada|Eire)\b{_LOC_BOUNDARY_GUARD}",
+    re.IGNORECASE,
+)
+
+# Bare or parenthesised EU ISO country codes — e.g. "NL", "DE (DE300)",
+# "FR (FRG01)". Anchored to start so we don't match random embedded codes,
+# and the optional tail allows a NUTS-region parenthetical or trailing
+# whitespace. Limited to actual EU/EEA-style member-state ISO codes; GB,
+# CH, IL have their own buckets.
+_EU_ISO_CODE_RE = re.compile(
+    r"^(?:DE|FR|NL|BE|ES|IT|AT|SE|DK|FI|IE|PT|PL|CZ|RO|HU|GR|HR|SK|SI|"
+    r"BG|LT|LV|EE|LU|MT|CY|NO|IS)"
+    r"(?:\s*\([^)]+\))?\s*$"
+)
+
+# Trailing 3-part ISO form: "Berlin, BE, de", "Paris, IDF, fr". Mirrors the
+# India/non-US shape — middle token is the region (2–5 letters, any case),
+# trailing token is the EU ISO country code. Anchored so a 2-part
+# "Wilmington, DE" stays Delaware.
+_EU_TRAILING_CC_RE = re.compile(
+    r",\s*[^,]+,\s*"
+    r"(?:DE|FR|NL|BE|ES|IT|AT|SE|DK|FI|IE|PT|PL|CZ|RO|HU|GR|HR|SK|SI|"
+    r"BG|LT|LV|EE|LU|MT|CY|NO|IS)\s*$",
+    re.IGNORECASE,
+)
+
+# ISO-then-postal form: "Utrecht, NL, 3584 AB", "Madrid, ES, 28001". The
+# middle position has the country ISO, the tail has the postal code. DE is
+# excluded because of the Delaware state-code overlap ("Wilmington, DE,
+# 19801" is Delaware, not Germany — we'd need richer context to disambiguate).
+_EU_ISO_POSTAL_RE = re.compile(
+    r",\s*(?:NL|FR|BE|ES|IT|AT|SE|DK|FI|IE|PT|PL|CZ|RO|HU|GR|HR|SK|SI|"
+    r"BG|LT|LV|EE|LU|MT|CY|NO|IS)\s*,\s*[\w\s-]+\s*$",
+    re.IGNORECASE,
+)
+
+# ----- Canada ---------------------------------------------------------------
+_CANADA_EXPLICIT_RE = re.compile(
+    rf"{_LOC_BOUNDARY_PREFIX}Canada\b{_LOC_BOUNDARY_GUARD}", re.IGNORECASE
+)
+
+# Province-code trailing form. Catches "Toronto, ON", "Toronto, ON, Canada",
+# "Toronto, ON, CA", "Toronto, ON, CAN", and "Toronto, ON, CA, M5H 1H1".
+# The optional postal-code tail uses the Canadian A1A 1A1 shape.
+# NL (Newfoundland & Labrador) is excluded because the dataset uses ", NL"
+# overwhelmingly to mean Netherlands, not the Canadian province.
+_CANADA_PROVINCE_RE = re.compile(
+    r",\s*(?:ON|BC|AB|QC|MB|SK|NS|NB|PE|YT|NT|NU)\b"
+    r"(?:,\s*(?:CA|CAN|Canada))?"
+    r"(?:,\s*[A-Z]\d[A-Z]\s?\d[A-Z]\d)?"
+    r"\s*$",
+    re.IGNORECASE,
+)
+
+# Unambiguous Canadian cities (skipping namesakes like London/Hamilton/Kingston
+# that have notable US counterparts).
+_CANADA_CITY_RE = re.compile(
+    r"\b("
+    r"Toronto|Vancouver|Montréal|Montreal|Calgary|Edmonton|Mississauga|"
+    r"Winnipeg|Brampton|Burnaby|Saskatoon|Saguenay|Sherbrooke|Markham|"
+    r"Vaughan|Gatineau|Laval|Trois-Rivières|Trois-Rivieres|Québec City|"
+    r"Quebec City|Etobicoke|Scarborough|North York"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# ----- United Kingdom -------------------------------------------------------
+_UK_EXPLICIT_RE = re.compile(
+    rf"{_LOC_BOUNDARY_PREFIX}United Kingdom\b{_LOC_BOUNDARY_GUARD}"
+    rf"|{_LOC_BOUNDARY_PREFIX}Great Britain\b{_LOC_BOUNDARY_GUARD}"
+    rf"|{_LOC_BOUNDARY_PREFIX}(?:England|Scotland|Wales|Northern Ireland)\b{_LOC_BOUNDARY_GUARD}",
+    re.IGNORECASE,
+)
+
+_UK_ISO_RE = re.compile(
+    r"^(?:GB|UK)(?:\s*\([^)]+\))?\s*$"
+    r"|,\s*(?:GB|UK)\s*$",
+    re.IGNORECASE,
+)
+
+_UK_CITY_RE = re.compile(
+    r"\b("
+    r"London|Manchester|Birmingham|Edinburgh|Glasgow|Bristol|Leeds|"
+    r"Liverpool|Sheffield|Cardiff|Belfast|Newcastle|Nottingham|Oxford|"
+    r"Cambridge|Reading|Brighton|Aberdeen|Dundee|Inverness|Plymouth|"
+    r"Portsmouth|Southampton|Coventry|Leicester|Wolverhampton|Croydon|"
+    r"Sunderland|Bournemouth|Swansea|Norwich|Milton Keynes"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# ----- Switzerland ----------------------------------------------------------
+_SWITZERLAND_EXPLICIT_RE = re.compile(
+    rf"{_LOC_BOUNDARY_PREFIX}(?:Switzerland|Suisse|Schweiz|Svizzera|Svizra)\b{_LOC_BOUNDARY_GUARD}",
+    re.IGNORECASE,
+)
+
+_SWITZERLAND_ISO_RE = re.compile(
+    r"^CH(?:\s*\([^)]+\))?\s*$|,\s*CH\s*$",
+    re.IGNORECASE,
+)
+
+_SWITZERLAND_CITY_RE = re.compile(
+    r"\b("
+    r"Zürich|Zurich|Genève|Geneva|Basel|Bern|Berne|Lausanne|Winterthur|"
+    r"Luzern|Lucerne|Lugano|Bienne|Biel/Bienne|Thun|Köniz|Koniz|Sion|"
+    r"Schaffhausen|Fribourg|Chur|Vernier|Neuchâtel|Neuchatel|Uster|Zug|"
+    r"Yverdon|Aarau|Baden|Sursee|St\.? Gallen|Gallen"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# ----- Israel ---------------------------------------------------------------
+# Note: IL is also Illinois's state code, so we deliberately do NOT match a
+# bare ",IL" trailing token — would false-positive every Chicago row.
+_ISRAEL_EXPLICIT_RE = re.compile(
+    rf"{_LOC_BOUNDARY_PREFIX}(?:Israel|ישראל)\b{_LOC_BOUNDARY_GUARD}",
+    re.IGNORECASE,
+)
+
+_ISRAEL_CITY_RE = re.compile(
+    r"\b("
+    r"Tel Aviv|Jerusalem|Haifa|Herzliya|Ra'anana|Raanana|Netanya|"
+    r"Petah Tikva|Beersheba|Be'er Sheva|Eilat|Holon|Bnei Brak|"
+    r"Ashdod|Ashkelon|Rehovot|Modi'in|Modiin|Kfar Saba|Yokneam|"
+    r"Yokne'am|Givatayim|Ramat Gan|Rishon LeZion|Rishon Lezion"
+    r")\b",
+    re.IGNORECASE,
+)
+
 USA_PATTERNS = [_USA_EXPLICIT_RE, _USA_STATE_CODE_RE, _USA_STATE_NAME_RE, _USA_CITY_RE]
+
+# Two-tier country detection:
+#   STRONG_BUCKETS  → matched BEFORE USA. Patterns must be unambiguous (explicit
+#                     country name, native name, anchored ISO code, trailing
+#                     ISO/province code). Win against US automatically.
+#   WEAK_BUCKETS    → matched AFTER USA. Bare-city patterns whose names overlap
+#                     with US localities (Manchester NH, Bern NC, Cambridge MA,
+#                     Bangalore PA…). Only fire if no US match found.
+STRONG_BUCKETS = [
+    ("IN", [_INDIA_EXPLICIT_RE, _INDIA_TRAILING_CC_RE]),
+    ("CA", [_CANADA_EXPLICIT_RE, _CANADA_PROVINCE_RE]),
+    ("GB", [_UK_EXPLICIT_RE, _UK_ISO_RE]),
+    ("CH", [_SWITZERLAND_EXPLICIT_RE, _SWITZERLAND_ISO_RE]),
+    ("IL", [_ISRAEL_EXPLICIT_RE]),
+    ("EU", [_EU_EXPLICIT_RE, _EU_ISO_CODE_RE, _EU_TRAILING_CC_RE,
+            _EU_ISO_POSTAL_RE, _EU_NATIVE_RE, _EU_COUNTRY_RE]),
+]
+WEAK_BUCKETS = [
+    ("IN", [_INDIA_CITY_RE]),
+    ("CA", [_CANADA_CITY_RE]),
+    ("GB", [_UK_CITY_RE]),
+    ("CH", [_SWITZERLAND_CITY_RE]),
+    ("IL", [_ISRAEL_CITY_RE]),
+]
 
 PERIOD_MULTIPLIER = {
     "HOUR": 2080, "HOURLY": 2080,
@@ -244,16 +456,30 @@ def strip_html(text: Any) -> str | None:
 def extract_country(location: Any) -> str | None:
     if not isinstance(location, str) or not location.strip():
         return None
-    # Negative filters first: if location explicitly names a non-US
-    # country/major city OR ends with a non-US ISO country code in the
-    # 3-part "City, Region, CC" pattern, refuse to tag as US.
-    if _NON_US_COUNTRY_RE.search(location):
+    # 1. Strong signals (unambiguous country names / anchored ISO codes).
+    for code, pats in STRONG_BUCKETS:
+        for p in pats:
+            if p.search(location):
+                return code
+    # 2. USA — positive match unless a non-US country/city or trailing ISO
+    # code disqualifies it.
+    if (not _NON_US_COUNTRY_RE.search(location)
+            and not _NON_US_TRAILING_CC_RE.search(location)):
+        for p in USA_PATTERNS:
+            if p.search(location):
+                return "US"
+    # 3. Weak fallback — bare-city patterns whose names overlap with US
+    # localities. Only reached when USA found no match (or was negatively
+    # filtered). If a US state code/name is present, the location is a US
+    # locality whose city happens to share a UK/CH namesake ("London, OH",
+    # "Geneva, NY") and the negative filter blocked it from being tagged
+    # US — don't misroute it to GB/CH.
+    if _USA_STATE_CODE_RE.search(location) or _USA_STATE_NAME_RE.search(location):
         return None
-    if _NON_US_TRAILING_CC_RE.search(location):
-        return None
-    for pat in USA_PATTERNS:
-        if pat.search(location):
-            return "US"
+    for code, pats in WEAK_BUCKETS:
+        for p in pats:
+            if p.search(location):
+                return code
     return None
 
 

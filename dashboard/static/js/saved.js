@@ -137,10 +137,14 @@ function savedPage() {
     },
 
     formatTimeAgo(iso) {
+      // Server returns SQLite-format "YYYY-MM-DD HH:MM:SS" without a TZ marker
+      // (UTC). Normalize to T-separated + Z so JS doesn't parse as local time.
       if (!iso) return "—";
-      const ts = new Date(iso);
+      let s = String(iso).replace(" ", "T");
+      if (!/[Zz]|[+-]\d{2}:?\d{2}$/.test(s)) s += "Z";
+      const ts = new Date(s);
       if (isNaN(ts.getTime())) return "—";
-      const secs = Math.floor((Date.now() - ts.getTime()) / 1000);
+      const secs = Math.max(0, Math.floor((Date.now() - ts.getTime()) / 1000));
       if (secs < 60)    return `${secs}s ago`;
       if (secs < 3600)  return `${Math.floor(secs / 60)}m ago`;
       if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;

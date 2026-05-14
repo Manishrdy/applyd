@@ -4,6 +4,7 @@ Usage:
     uv run python -m app.cli init-db
     uv run python -m app.cli ingest [--force] [--ats apple google meta ...]
     uv run python -m app.cli stats
+    uv run python -m app.cli backfill-country [--all]
 """
 
 from __future__ import annotations
@@ -96,6 +97,48 @@ def cmd_stats(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_backfill_country(args: argparse.Namespace) -> int:
+    """Re-run extract_country over existing rows.
+
+    Default mode rewrites only rows where country is NULL or '' — useful after
+    adding new detection patterns (IN, EU, …) to retag previously-untagged
+    rows without touching the existing US set. --all rewrites every row.
+    """
+    from app.services.ingestion import extract_country
+
+    init_db()
+    where = "" if args.all else "WHERE country IS NULL OR country = ''"
+    with get_db() as conn:
+        rows = conn.execute(f"SELECT id, location, country FROM jobs {where}").fetchall()
+        log = logging.getLogger("backfill")
+        log.info("scanning %d rows", len(rows))
+        updates: list[tuple[str | None, int]] = []
+        for r in rows:
+            new = extract_country(r["location"])
+            if new != r["country"]:
+                updates.append((new, r["id"]))
+        log.info("updating %d rows", len(updates))
+        conn.execute("BEGIN")
+        try:
+            conn.executemany("UPDATE jobs SET country=? WHERE id=?", updates)
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+        counts = conn.execute(
+            "SELECT COALESCE(NULLIF(country, ''), '(none)') AS c, COUNT(*) AS n "
+            "FROM jobs GROUP BY c ORDER BY n DESC"
+        ).fetchall()
+    print(f"scanned:  {len(rows):>10,}")
+    print(f"updated:  {len(updates):>10,}")
+    print()
+    print("country distribution:")
+    for row in counts:
+        print(f"  {row['c']:<10} {row['n']:>10,}")
+    return 0
+
+
 def main() -> int:
     _setup_logging()
     parser = argparse.ArgumentParser(prog="app.cli")
@@ -113,6 +156,14 @@ def main() -> int:
 
     p_stats = sub.add_parser("stats", help="show DB stats")
     p_stats.set_defaults(func=cmd_stats)
+
+    p_bf = sub.add_parser(
+        "backfill-country",
+        help="re-run country detection on existing rows (default: only NULL/empty)",
+    )
+    p_bf.add_argument("--all", action="store_true",
+                      help="re-tag every row, not just NULL/empty ones")
+    p_bf.set_defaults(func=cmd_backfill_country)
 
     args = parser.parse_args()
     return args.func(args)

@@ -12,7 +12,7 @@
  *   custom layer → component primitives & overrides
  * ============================================================ */
 
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400..800&family=IBM+Plex+Mono:wght@400;500&display=swap");
 @import "./tokens.css";
 @import "tailwindcss";
 
@@ -61,7 +61,8 @@
   --shadow-soft-sm:         var(--shadow-sm);
   --shadow-soft-lg:         var(--shadow-lg);
 
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: "Manrope", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 /* ---- Base layer ------------------------------------------- */
@@ -71,7 +72,7 @@
     font-family: var(--font-sans);
     background-color: hsl(var(--bg));
     color: hsl(var(--text));
-    /* Inter looks best with kerning + ligatures + tabular numerals on tables */
+    /* Manrope looks best with moderate feature support */
     font-feature-settings: "cv11", "ss01", "ss03";
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -81,6 +82,9 @@
     background-color: hsl(var(--bg));
     color: hsl(var(--text));
     min-height: 100dvh;
+    background-image:
+      radial-gradient(1200px 700px at -10% -10%, hsl(var(--accent) / 0.08), transparent 50%),
+      radial-gradient(900px 500px at 110% -5%, hsl(var(--accent) / 0.06), transparent 50%);
   }
 
   /* Smooth theme transitions on the elements that change colors */
@@ -120,6 +124,7 @@
     border: 1px solid hsl(var(--border));
     border-radius: var(--radius);
     box-shadow: var(--shadow-sm);
+    backdrop-filter: saturate(115%) blur(2px);
   }
 
   .card-elevated {
@@ -135,7 +140,7 @@
   .card-interactive:hover {
     border-color: hsl(var(--border-strong));
     box-shadow: var(--shadow);
-    transform: translateY(-1px);
+    transform: translateY(-2px);
   }
 
   /* Button base */
@@ -163,20 +168,23 @@
   .btn-primary {
     background-color: hsl(var(--accent));
     color: hsl(var(--accent-fg));
+    box-shadow: 0 10px 20px -12px hsl(var(--accent) / 0.7);
   }
 
   .btn-primary:hover:not(:disabled) {
     background-color: hsl(var(--accent-hover));
+    box-shadow: 0 16px 28px -16px hsl(var(--accent) / 0.75);
   }
 
   .btn-secondary {
-    background-color: hsl(var(--surface));
+    background-color: hsl(var(--surface-elevated) / 0.75);
     color: hsl(var(--text));
     border-color: hsl(var(--border));
+    backdrop-filter: blur(6px);
   }
 
   .btn-secondary:hover:not(:disabled) {
-    background-color: hsl(var(--surface-muted));
+    background-color: hsl(var(--surface-elevated) / 0.7);
     border-color: hsl(var(--border-strong));
   }
 
@@ -229,7 +237,7 @@
   .input:focus {
     outline: none;
     border-color: hsl(var(--ring));
-    box-shadow: 0 0 0 3px hsl(var(--ring) / 0.15);
+    box-shadow: 0 0 0 3px hsl(var(--ring) / 0.2), var(--shadow-sm);
   }
 
   /* Select shares input styling */
@@ -253,7 +261,7 @@
     line-height: 1.25;
     border-radius: var(--radius-pill);
     border: 1px solid hsl(var(--border));
-    background-color: hsl(var(--surface-muted));
+    background-color: hsl(var(--surface-elevated) / 0.75);
     color: hsl(var(--text-muted));
   }
 
@@ -348,7 +356,7 @@
     font-weight: 500;
     line-height: 1.25;
     border-radius: var(--radius-pill);
-    background-color: hsl(var(--surface-muted));
+    background-color: hsl(var(--surface-elevated) / 0.72);
     color: hsl(var(--text-muted));
     border: 1px solid hsl(var(--border));
   }
@@ -359,6 +367,165 @@
     height: 6px;
     border-radius: 9999px;
     background-color: hsl(var(--success));
+  }
+
+  .font-mono,
+  code,
+  kbd,
+  pre {
+    font-family: var(--font-mono);
+  }
+
+  /* ---- Form controls --------------------------------------- */
+  /* Replaces the harsh UA-chrome (near-black box in both light &
+   * dark mode) with themed surface + accent styling. */
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    background-color: hsl(var(--surface-elevated));
+    border: 1.5px solid hsl(var(--border-strong));
+    cursor: pointer;
+    display: inline-grid;
+    place-content: center;
+    transition: background-color 120ms ease, border-color 120ms ease;
+  }
+
+  input[type="checkbox"] {
+    border-radius: 4px;
+  }
+
+  input[type="radio"] {
+    border-radius: 9999px;
+  }
+
+  input[type="checkbox"]:hover:not(:disabled),
+  input[type="radio"]:hover:not(:disabled) {
+    border-color: hsl(var(--accent));
+  }
+
+  input[type="checkbox"]:checked,
+  input[type="radio"]:checked {
+    background-color: hsl(var(--accent));
+    border-color: hsl(var(--accent));
+  }
+
+  /* Check glyph for checkbox */
+  input[type="checkbox"]:checked::after {
+    content: "";
+    width: 10px;
+    height: 10px;
+    background-color: hsl(var(--accent-fg));
+    -webkit-mask: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='3 8 7 12 13 4'/%3E%3C/svg%3E") center/contain no-repeat;
+    mask: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='3 8 7 12 13 4'/%3E%3C/svg%3E") center/contain no-repeat;
+  }
+
+  /* Dot for radio */
+  input[type="radio"]:checked::after {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background-color: hsl(var(--accent-fg));
+  }
+
+  input[type="checkbox"]:disabled,
+  input[type="radio"]:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* Range slider */
+  input[type="range"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    height: 1.25rem;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 9999px;
+    background: hsl(var(--surface-muted));
+    border: 1px solid hsl(var(--border));
+  }
+
+  input[type="range"]::-moz-range-track {
+    height: 4px;
+    border-radius: 9999px;
+    background: hsl(var(--surface-muted));
+    border: 1px solid hsl(var(--border));
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 9999px;
+    background: hsl(var(--accent));
+    border: 2px solid hsl(var(--accent-fg));
+    box-shadow: var(--shadow-sm);
+    margin-top: -7px;
+    transition: transform 120ms ease;
+  }
+
+  input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 9999px;
+    background: hsl(var(--accent));
+    border: 2px solid hsl(var(--accent-fg));
+    box-shadow: var(--shadow-sm);
+    transition: transform 120ms ease;
+  }
+
+  input[type="range"]:hover::-webkit-slider-thumb {
+    transform: scale(1.1);
+  }
+
+  input[type="range"]:hover::-moz-range-thumb {
+    transform: scale(1.1);
+  }
+
+  /* ---- Scrollbars ------------------------------------------ */
+  /* Replace the dark UA scrollbar with a slim themed track. */
+
+  /* Firefox + modern browsers */
+  html {
+    scrollbar-color: hsl(var(--border-strong)) transparent;
+    scrollbar-width: thin;
+  }
+
+  /* WebKit / Blink — page-level and inner scrollables */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border-strong));
+    border-radius: 9999px;
+    border: 2px solid hsl(var(--bg));
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--accent));
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: transparent;
   }
 }
 

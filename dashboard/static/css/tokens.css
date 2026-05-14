@@ -14,23 +14,23 @@
 
 :root {
   /* Surfaces (light) */
-  --bg:               0   0%   100%;   /* page background */
-  --surface:          0   0%   98%;    /* cards, panels */
-  --surface-elevated: 0   0%   100%;   /* modals, popovers */
-  --surface-muted:    220 14%  96%;    /* subtle hover, input bg */
+  --bg:               42  38%  97%;
+  --surface:          40  29%  99%;
+  --surface-elevated: 0   0%   100%;
+  --surface-muted:    36  24%  94%;
 
   /* Borders (light) */
-  --border:           220 13%  91%;
-  --border-strong:    220 13%  82%;
+  --border:           32  16%  85%;
+  --border-strong:    28  20%  73%;
 
   /* Text (light) */
-  --text:             224 71%  4%;
-  --text-muted:       220 9%   46%;
-  --text-subtle:      220 9%   60%;
+  --text:             220 16%  16%;
+  --text-muted:       222 9%   37%;
+  --text-subtle:      222 8%   50%;
 
-  /* Accent — primary interactive (light: dark accent on light bg) */
-  --accent:           224 71%  4%;
-  --accent-hover:     224 71%  10%;
+  /* Accent */
+  --accent:           198 60%  30%;
+  --accent-hover:     198 62%  24%;
   --accent-fg:        0   0%   100%;
 
   /* Semantic */
@@ -44,7 +44,7 @@
   --info-fg:          0   0%   100%;
 
   /* Focus ring */
-  --ring:             217 91%  60%;
+  --ring:             198 65%  40%;
 
   /* Radii — premium feel leans on slightly larger curves */
   --radius:           0.875rem;        /* 14px — default */
@@ -53,34 +53,34 @@
   --radius-pill:      9999px;
 
   /* Elevation — subtle, modern */
-  --shadow-sm:        0 1px 2px 0 hsl(220 43% 11% / 0.04),
-                      0 1px 1px 0 hsl(220 43% 11% / 0.02);
-  --shadow:           0 4px 8px -2px hsl(220 43% 11% / 0.06),
-                      0 2px 4px -1px hsl(220 43% 11% / 0.04);
-  --shadow-lg:        0 16px 32px -8px hsl(220 43% 11% / 0.10),
-                      0 4px 8px -2px hsl(220 43% 11% / 0.06);
+  --shadow-sm:        0 1px 2px 0 hsl(220 20% 12% / 0.04),
+                      0 8px 18px -14px hsl(220 20% 12% / 0.10);
+  --shadow:           0 1px 2px 0 hsl(220 20% 12% / 0.05),
+                      0 18px 34px -20px hsl(220 20% 12% / 0.18);
+  --shadow-lg:        0 2px 8px -2px hsl(220 20% 12% / 0.08),
+                      0 28px 52px -24px hsl(220 20% 12% / 0.26);
 }
 
 :root.dark {
   /* Surfaces (dark) */
-  --bg:               224 71%  4%;
-  --surface:          222 47%  8%;
-  --surface-elevated: 217 33%  12%;
-  --surface-muted:    217 33%  15%;
+  --bg:               222 28%  10%;
+  --surface:          220 22%  13%;
+  --surface-elevated: 219 22%  15%;
+  --surface-muted:    219 20%  18%;
 
   /* Borders (dark) */
-  --border:           215 28%  17%;
-  --border-strong:    215 28%  25%;
+  --border:           216 16%  24%;
+  --border-strong:    216 14%  34%;
 
   /* Text (dark) */
-  --text:             210 40%  96%;
-  --text-muted:       215 20%  65%;
-  --text-subtle:      215 16%  47%;
+  --text:             42  23%  92%;
+  --text-muted:       30  13%  72%;
+  --text-subtle:      26  10%  56%;
 
   /* Accent — primary interactive (dark: light accent on dark bg) */
-  --accent:           210 40%  96%;
-  --accent-hover:     210 40%  85%;
-  --accent-fg:        222 47%  8%;
+  --accent:           191 70%  68%;
+  --accent-hover:     191 70%  74%;
+  --accent-fg:        220 22%  13%;
 
   /* Semantic — slightly desaturated for dark backgrounds */
   --success:          142 71%  45%;
@@ -93,10 +93,12 @@
   --info-fg:          0   0%   8%;
 
   /* Focus ring */
-  --ring:             217 91%  65%;
+  --ring:             191 70%  68%;
 
   /* Elevation — softer in dark mode */
-  --shadow-sm:        0 1px 2px 0 hsl(0 0% 0% / 0.4);
-  --shadow:           0 4px 8px -2px hsl(0 0% 0% / 0.5);
-  --shadow-lg:        0 16px 32px -8px hsl(0 0% 0% / 0.6);
+  --shadow-sm:        0 1px 2px 0 hsl(0 0% 0% / 0.38);
+  --shadow:           0 2px 10px -2px hsl(0 0% 0% / 0.36),
+                      0 20px 38px -24px hsl(0 0% 0% / 0.62);
+  --shadow-lg:        0 8px 18px -8px hsl(0 0% 0% / 0.42),
+                      0 34px 60px -30px hsl(0 0% 0% / 0.72);
 }

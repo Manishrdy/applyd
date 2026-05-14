@@ -27,7 +27,7 @@
   <fieldset class="space-y-2">
     <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Country</legend>
     <div class="space-y-1 max-h-48 overflow-y-auto">
-      <template x-for="row in facets.country.slice(0, 12)" :key="row.value || '_'">
+      <template x-for="row in countryFacetRows()" :key="row.value || '_'">
         <label class="flex items-center justify-between gap-2 px-1 py-1 cursor-pointer rounded-sm hover:bg-surface-muted">
           <span class="flex items-center gap-2 min-w-0">
             <input type="checkbox"
@@ -35,7 +35,7 @@
                    :disabled="!row.value"
                    @change="row.value && toggleArrayFilter('country', row.value)"
                    class="accent-accent">
-            <span class="text-sm truncate" x-text="row.value || '— unknown'"></span>
+            <span class="text-sm truncate" x-text="facetLabel('country', row.value)"></span>
           </span>
           <span class="text-xs text-text-subtle tabular shrink-0" x-text="row.count.toLocaleString()"></span>
         </label>
@@ -76,7 +76,7 @@
                    :disabled="!row.value"
                    @change="row.value && toggleArrayFilter('ats', row.value)"
                    class="accent-accent">
-            <span class="text-sm truncate" x-text="row.value || '— unknown'"></span>
+            <span class="text-sm truncate" x-text="facetLabel('ats', row.value)"></span>
           </span>
           <span class="text-xs text-text-subtle tabular shrink-0" x-text="row.count.toLocaleString()"></span>
         </label>
@@ -92,18 +92,17 @@
   </fieldset>
 
   {# ===== Employment type (facet multi) ===== #}
-  <fieldset class="space-y-2" x-show="facets.employment_type.length">
+  <fieldset class="space-y-2" x-show="employmentFacetRows().length">
     <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Employment type</legend>
     <div class="space-y-1 max-h-48 overflow-y-auto">
-      <template x-for="row in facets.employment_type.slice(0, 8)" :key="row.value || '_'">
+      <template x-for="row in employmentFacetRows()" :key="row.value">
         <label class="flex items-center justify-between gap-2 px-1 py-1 cursor-pointer rounded-sm hover:bg-surface-muted">
           <span class="flex items-center gap-2 min-w-0">
             <input type="checkbox"
-                   :checked="row.value && isChecked('employment_type', row.value)"
-                   :disabled="!row.value"
-                   @change="row.value && toggleArrayFilter('employment_type', row.value)"
+                   :checked="isChecked('employment_type', row.value)"
+                   @change="toggleArrayFilter('employment_type', row.value)"
                    class="accent-accent">
-            <span class="text-sm truncate" x-text="row.value || '— unknown'"></span>
+            <span class="text-sm truncate" x-text="facetLabel('employment_type', row.value)"></span>
           </span>
           <span class="text-xs text-text-subtle tabular shrink-0" x-text="row.count.toLocaleString()"></span>
         </label>
