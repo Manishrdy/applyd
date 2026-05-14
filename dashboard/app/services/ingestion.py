@@ -790,6 +790,14 @@ async def run_ingestion(
         datetime.now(timezone.utc) - timedelta(days=settings.rolling_window_days)
     )
 
+    # Keep ATS company catalogs fresh in parallel with the manifest/job path.
+    # This runs on every ingestion attempt (cron/manual/catch-up), including
+    # cycles that later short-circuit as "skipped".
+    from app.services.company_catalog_sync import sync_company_catalogs
+
+    catalog_sync_task = asyncio.create_task(sync_company_catalogs())
+    catalog_sync: dict[str, Any] | None = None
+
     log.info("fetching manifest from %s", settings.manifest_url)
     manifest = await manifest_svc.fetch_manifest()
     manifest_updated_at = manifest.get("updated_at", "")
@@ -800,6 +808,11 @@ async def run_ingestion(
 
     with get_db() as conn:
         if not force and not manifest_svc.should_ingest(conn, manifest):
+            try:
+                catalog_sync = await catalog_sync_task
+            except Exception as e:
+                log.warning("company catalog sync failed during skipped cycle: %s", e)
+                catalog_sync = {"status": "failed", "error": str(e)}
             log.info("manifest unchanged (updated_at=%s); skipping",
                      manifest_updated_at)
             conn.execute(
@@ -810,7 +823,11 @@ async def run_ingestion(
                  len(manifest_svc.list_ats(manifest)), 0, 0, "skipped",
                  time.time() - t0),
             )
-            return {"status": "skipped", "manifest_updated_at": manifest_updated_at}
+            return {
+                "status": "skipped",
+                "manifest_updated_at": manifest_updated_at,
+                "company_catalog_sync": catalog_sync,
+            }
 
     ats_names = manifest_svc.list_ats(manifest)
     if ats_filter is not None:
@@ -862,9 +879,16 @@ async def run_ingestion(
                  duration),
             )
             cache_svc.bump_jobs_cache_version()
+        try:
+            catalog_sync = await catalog_sync_task
+        except Exception as e:
+            log.warning("company catalog sync failed after ingest: %s", e)
+            catalog_sync = {"status": "failed", "error": str(e)}
     except Exception as e:
         error = str(e)
         log.exception("ingestion failed")
+        if not catalog_sync_task.done():
+            catalog_sync_task.cancel()
         with get_db() as conn:
             conn.execute(
                 "INSERT INTO manifest_log (fetched_at, manifest_updated_at, "
@@ -883,5 +907,6 @@ async def run_ingestion(
         "rows_upserted": total_upserted,
         "rows_pruned": rows_pruned,
         "manifest_updated_at": manifest_updated_at,
+        "company_catalog_sync": catalog_sync,
         "per_ats": per_ats,
     }

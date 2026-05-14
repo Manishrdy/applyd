@@ -101,17 +101,99 @@ applyd/
 
 ---
 
-## Quick Start (MS1 Dashboard)
+## Setup Instructions (Detailed)
+
+### 1) Clone repository
+
+```bash
+git clone https://github.com/Manishrdy/applyd.git
+cd applyd
+```
+
+### 2) Prerequisites
+
+Install these on your machine:
+
+- Python `3.12+`
+- `uv` ([install guide](https://docs.astral.sh/uv/getting-started/installation/))
+- Docker (for local Redis)
+
+### 3) Install dashboard dependencies
 
 ```bash
 cd dashboard
 uv sync
+```
+
+### 4) Configure environment
+
+```bash
 cp .env.example .env
+```
+
+Update `.env` as needed for your machine. For local development, defaults are typically enough.
+
+### 5) Start Redis (Docker)
+
+```bash
+docker pull redis:7-alpine
+docker run -d --name applyd-redis -p 6379:6379 redis:7-alpine
+docker ps --filter "name=applyd-redis"
+```
+
+Useful Redis container commands:
+
+```bash
+docker logs -f applyd-redis
+docker stop applyd-redis
+docker start applyd-redis
+docker rm -f applyd-redis
+```
+
+### 6) Initialize local data + ingest jobs
+
+From `dashboard/`:
+
+```bash
+uv run python -m app.cli init-db
+uv run python -m app.cli sync-company-catalogs --dry-run
 uv run python -m app.cli ingest
+uv run python -m app.cli stats
+```
+
+What this does:
+
+- Creates SQLite schema
+- Checks ATS company catalog freshness
+- Ingests upstream jobs into local DB
+- Prints health/stats summary
+
+### 7) Run the dashboard app
+
+```bash
 uv run uvicorn app.main:app --reload
 ```
 
 Open: [http://localhost:8000](http://localhost:8000)
+
+### 8) Trigger ingest manually (optional)
+
+CLI:
+
+```bash
+uv run python -m app.cli ingest
+```
+
+API:
+
+```bash
+curl -X POST "http://localhost:8000/api/ingest?force=false"
+```
+
+Notes:
+
+- Scheduler runs daily ingestion at `11:00 UTC`.
+- Every ingestion attempt (scheduled, catch-up, or manual) also syncs ATS company catalogs in parallel.
 
 ---
 
@@ -146,6 +228,11 @@ uv run python -m app.cli sync-company-catalogs
 This repository also includes a weekly GitHub Actions workflow
 (`.github/workflows/sync-ats-company-catalogs.yml`) that opens a PR when
 upstream ATS company CSVs change.
+
+Additionally, every ingestion attempt (`11:00 UTC` daily run, catch-up poll,
+or manual `/api/ingest` / CLI ingest) triggers ATS catalog sync in parallel.
+This means catalog refresh still runs even when the manifest/job ingest cycle
+is skipped due to unchanged upstream `updated_at`.
 
 ---
 
