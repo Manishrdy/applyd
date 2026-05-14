@@ -132,8 +132,19 @@
         </p>
       </div>
 
-      <div class="flex items-center gap-2">
-        <label for="sort-select" class="text-sm text-text-muted">Sort</label>
+      <div class="flex items-center gap-2 flex-wrap">
+        <button type="button"
+                class="btn btn-sm"
+                :class="freshlyAddedActive() ? 'btn-primary' : 'btn-secondary'"
+                @click="toggleFreshlyAdded(6)"
+                title="Filter to rows we first ingested in the last 6 hours (use after a manual scrape)">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+          </svg>
+          Freshly added (6h)
+        </button>
+
+        <label for="sort-select" class="text-sm text-text-muted ml-2">Sort</label>
         {# Options are written out statically rather than via <template x-for>:
            the HTML parser disallows non-<option>/<optgroup> children inside
            <select>, so the <template> wrapper can confuse the popover and

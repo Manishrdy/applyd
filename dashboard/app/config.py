@@ -33,6 +33,30 @@ class Settings(BaseSettings):
     default_page_size: int = 50
     max_page_size: int = 100
 
+    # Local-scraper module (manual-trigger pipeline; see /scrape page).
+    # Daily jobhive cron is unaffected by these.
+    local_scraper_enabled: bool = True
+    # Allow-list: empty means "no restriction" — every ATS with a vendored
+    # companies CSV is selectable. Heavy ATS (Playwright-backed) will fail
+    # at runtime without the scrapers extra installed in the vendor venv;
+    # that's a clear error per-run, not a silent skip.
+    local_scraper_allowed_ats: list[str] = []
+    # Pre-selected on page load when allow-list is empty.
+    local_scraper_recommended_ats: list[str] = ["lever", "ashby", "greenhouse"]
+    # Hard cap on how many ATS one run can target. Sequential per ATS means
+    # 5 fast ATS ≈ minutes, 5 slow ATS ≈ hours.
+    local_scraper_max_ats_per_run: int = 5
+    local_scraper_timeout_seconds: int = 1800   # per-ATS hard timeout
+    local_scraper_default_max_companies: int | None = 500  # bound applied if user doesn't override
+    local_scraper_default_incremental_days: int = 7
+    # How many companies within ONE ATS can be scraped in parallel inside
+    # the shim. Sequential per ATS is still enforced; this only parallelizes
+    # the per-company HTTP loop. 8 is a reasonable default for most ATS
+    # endpoints — drop to 1 if a target rate-limits or behaves oddly.
+    local_scraper_per_company_concurrency: int = 8
+    scraper_log_retention_days: int = 14
+    scrape_run_history_keep: int = 100
+
 
 settings = Settings()
 settings.db_path.parent.mkdir(parents=True, exist_ok=True)

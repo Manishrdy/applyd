@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block title %}Run #{{ run_id }}{% endblock %}
+
+{% block body_attrs %}x-data="scrapeDetailPage({{ run_id }})" x-init="init()"{% endblock %}
+
+{% block head %}
+  <script defer src="{{ url_for('static', path='js/scrape_detail.js') }}"></script>
+{% endblock %}
+
+{% block main %}
+<div class="space-y-8 max-w-6xl">
+
+  <header class="space-y-1">
+    <div class="flex items-center gap-3">
+      <a href="/scrape" class="btn btn-ghost btn-sm" title="Back to scrape">← Scrape</a>
+      <h1 class="text-3xl font-semibold tracking-tight">Run #{{ run_id }}</h1>
+      <span x-show="run" x-cloak :class="statusClass(run?.status)" x-text="run?.status"></span>
+      <span x-show="run?.live" x-cloak class="inline-block h-2 w-2 rounded-full bg-accent animate-pulse" title="live"></span>
+    </div>
+    <p x-show="run" x-cloak class="text-text-muted text-sm">
+      <span x-text="fmtTime(run?.started_at)"></span>
+      · <span x-text="fmtDuration(run?.started_at, run?.finished_at)"></span>
+      · triggered by <span class="font-mono" x-text="run?.triggered_by"></span>
+      <template x-if="run?.scraper_version">
+        <span> · jobhive <span class="font-mono" x-text="run.scraper_version.slice(0,8)"></span></span>
+      </template>
+      <template x-if="run?.max_companies_per_ats">
+        <span> · max <span class="tabular" x-text="run.max_companies_per_ats"></span> companies/ATS</span>
+      </template>
+    </p>
+  </header>
+
+  <div x-show="loadError" x-cloak class="toast">
+    <div class="flex items-start gap-3">
+      <div class="flex-1 text-sm">Couldn't load run · <span x-text="loadError"></span></div>
+      <button class="btn btn-secondary btn-sm" @click="fetch()">Retry</button>
+    </div>
+  </div>
+
+  {# ====== Totals strip ====== #}
+  <section x-show="run" x-cloak class="grid grid-cols-2 md:grid-cols-6 gap-3">
+    <div class="card p-4">
+      <p class="text-xs uppercase tracking-wider text-text-subtle">Scraped</p>
+      <p class="text-2xl font-semibold tabular" x-text="fmtNum(run?.total_scraped)"></p>
+      <p class="text-xs text-text-subtle">jobs returned by scraper</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-xs uppercase tracking-wider text-text-subtle">Failed</p>
+      <p class="text-2xl font-semibold tabular" :class="(run?.total_failed||0) > 0 ? 'text-danger' : ''" x-text="fmtNum(run?.total_failed)"></p>
+      <p class="text-xs text-text-subtle">companies that errored</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-xs uppercase tracking-wider text-text-subtle">Written</p>
+      <p class="text-2xl font-semibold tabular" x-text="fmtNum(run?.total_written)"></p>
+      <p class="text-xs text-text-subtle">rows upserted (post-filter)</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-xs uppercase tracking-wider text-text-subtle">Inserted</p>
+      <p class="text-2xl font-semibold tabular" x-text="fmtNum(run?.total_inserted)"></p>
+      <p class="text-xs text-text-subtle">new rows</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-xs uppercase tracking-wider text-text-subtle">Updated</p>
+      <p class="text-2xl font-semibold tabular" x-text="fmtNum(run?.total_updated)"></p>
+      <p class="text-xs text-text-subtle">existing rows</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-xs uppercase tracking-wider text-text-subtle">ATS</p>
+      <p class="text-2xl font-semibold tabular" x-text="(run?.ats_requested || []).length"></p>
+      <p class="text-xs text-text-subtle font-mono break-all" x-text="(run?.ats_requested || []).join(', ')"></p>
+    </div>
+  </section>
+
+  {# ====== Per-ATS breakdown ====== #}
+  <section class="space-y-3" x-show="run" x-cloak>
+    <h2 class="text-xl font-semibold">Per-ATS detail</h2>
+
+    <template x-for="ats in run?.per_ats || []" :key="ats.id">
+      <div class="card p-5 space-y-4">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+          <div class="flex items-center gap-3">
+            <h3 class="text-lg font-semibold" x-text="ats.ats"></h3>
+            <span :class="statusClass(ats.status)" x-text="ats.status"></span>
+            <span class="text-xs text-text-subtle" x-text="fmtDuration(ats.started_at, ats.finished_at)"></span>
+            <span class="text-xs text-text-subtle font-mono">phase <span x-text="ats.phase || 'pending'"></span></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <a
+              :href="viewJobsUrl(ats)"
+              class="btn btn-primary btn-sm"
+              x-show="ats.rows_written > 0"
+              x-cloak
+              title="Open the dashboard scoped to the rows this run touched on this ATS">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+              View <span x-text="fmtNum(ats.rows_written)"></span> jobs
+            </a>
+            <button class="btn btn-ghost btn-sm" @click="toggleLog(ats.ats)" :disabled="!ats.log_path">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              <span x-text="logs[ats.ats]?.open ? 'Hide log' : 'View log'"></span>
+            </button>
+          </div>
+        </div>
+
+        {# Companies progress bar #}
+        <div class="space-y-1">
+          <div class="flex justify-between text-xs text-text-muted">
+            <span>companies</span>
+            <span class="tabular">
+              <span class="text-text" x-text="fmtNum(ats.companies_succeeded)"></span>
+              <span class="text-text-subtle">/ <span x-text="fmtNum(ats.companies_total)"></span> succeeded</span>
+              <template x-if="ats.companies_failed > 0">
+                <span class="text-danger ml-2">· <span x-text="fmtNum(ats.companies_failed)"></span> failed</span>
+              </template>
+            </span>
+          </div>
+          <div class="h-2 rounded-full bg-surface-muted overflow-hidden">
+            <div class="h-full bg-accent transition-all"
+                 :style="`width: ${pct((ats.companies_succeeded||0) + (ats.companies_failed||0), ats.companies_total||0)}%`"></div>
+          </div>
+        </div>
+
+        {# Counter grid #}
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1">
+          <div>
+            <p class="text-xs text-text-subtle">Rows scraped</p>
+            <p class="text-xl font-semibold tabular" x-text="fmtNum(ats.rows_scraped)"></p>
+          </div>
+          <div>
+            <p class="text-xs text-text-subtle">Inserted / Updated</p>
+            <p class="text-xl font-semibold tabular"><span x-text="fmtNum(ats.rows_inserted)"></span> / <span x-text="fmtNum(ats.rows_updated)"></span></p>
+          </div>
+          <div>
+            <p class="text-xs text-text-subtle">Rows written</p>
+            <p class="text-xl font-semibold tabular" x-text="fmtNum(ats.rows_written)"></p>
+          </div>
+          <div>
+            <p class="text-xs text-text-subtle">Failed</p>
+            <p class="text-xl font-semibold tabular" :class="(ats.rows_failed||ats.companies_failed||0) > 0 ? 'text-danger' : ''"
+               x-text="fmtNum(ats.companies_failed)"></p>
+          </div>
+          <div x-show="ats.rows_skipped_safeguard > 0" x-cloak>
+            <p class="text-xs text-text-subtle">Safeguard preserved</p>
+            <p class="text-xl font-semibold tabular text-warning" x-text="fmtNum(ats.rows_skipped_safeguard)"></p>
+          </div>
+        </div>
+
+        {# Error / note #}
+        <div x-show="ats.error" x-cloak class="text-sm">
+          <p class="text-xs uppercase tracking-wider text-text-subtle">Note</p>
+          <p class="font-mono text-text-muted break-words" x-text="ats.error"></p>
+        </div>
+
+        {# Log viewer (lazy-loaded) #}
+        <div x-show="logs[ats.ats]?.open" x-cloak class="border-t border-border-base pt-3">
+          <div class="flex items-center justify-between mb-2">
+            <p class="text-xs uppercase tracking-wider text-text-subtle">
+              Subprocess log
+              <span x-show="ats.log_path" class="font-mono text-text-subtle/70" x-text="ats.log_path"></span>
+            </p>
+            <span x-show="logs[ats.ats]?.loading" class="text-xs text-text-subtle">loading…</span>
+          </div>
+          <pre x-show="!logs[ats.ats]?.loading && !logs[ats.ats]?.error"
+               class="bg-surface-muted border border-border-base rounded-base text-xs p-3 overflow-x-auto max-h-96 overflow-y-auto font-mono whitespace-pre"
+               x-text="logs[ats.ats]?.text || '(empty)'"></pre>
+          <p x-show="logs[ats.ats]?.error" x-cloak class="text-sm text-danger" x-text="logs[ats.ats]?.error"></p>
+        </div>
+      </div>
+    </template>
+  </section>
+
+</div>
+{% endblock %}

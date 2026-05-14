@@ -48,6 +48,7 @@ function commandPalette() {
     { id: "nav-saved",    label: "Saved jobs",      hint: "/saved",     group: "Navigate", action: () => location.assign("/saved") },
     { id: "nav-stats",    label: "Stats",           hint: "/stats",     group: "Navigate", action: () => location.assign("/stats") },
     { id: "nav-settings", label: "Settings",        hint: "/settings",  group: "Navigate", action: () => location.assign("/settings") },
+    { id: "nav-scrape",   label: "Scrape (manual)", hint: "/scrape",    group: "Navigate", action: () => location.assign("/scrape") },
     { id: "nav-style",    label: "Styleguide",      hint: "/styleguide",group: "Navigate", action: () => location.assign("/styleguide") },
     { id: "nav-docs",     label: "API docs",        hint: "/docs",      group: "Navigate", action: () => location.assign("/docs") },
     { id: "act-theme",    label: "Toggle light / dark theme", hint: "⌘+K then T", group: "Actions",

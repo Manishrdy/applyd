@@ -17,14 +17,11 @@ import sys
 
 from app.config import settings
 from app.database import get_db, init_db
+from app.logging_config import configure_logging
 
 
 def _setup_logging() -> None:
-    logging.basicConfig(
-        level=settings.log_level,
-        format="%(asctime)s %(levelname)-7s %(name)s | %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    configure_logging(settings.log_level)
 
 
 def cmd_init_db(_: argparse.Namespace) -> int:

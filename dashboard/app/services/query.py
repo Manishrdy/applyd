@@ -69,6 +69,19 @@ class JobFilters:
     # patterns. See app/services/roles.py for the dictionaries.
     roles: tuple[str, ...] = ()
     seniority: tuple[str, ...] = ()
+    # Time-of-INGESTION filters — orthogonal to posted_hours which is
+    # time-of-POSTING. Drives "freshly added (6h)" and the per-scrape-run
+    # drill-down ("show me the rows this run touched"). ISO 8601 strings,
+    # interpreted by SQLite as UTC. first_seen_at = preserved on UPSERT
+    # (true ingest age); updated_at = bumped on every UPSERT (row-touched).
+    first_seen_after: str | None = None
+    first_seen_before: str | None = None
+    updated_after: str | None = None
+    updated_before: str | None = None
+    # Per-run drill-down: filter to exactly the URLs this scrape run loaded.
+    # Survives later writes (cron, other manual runs) bumping jobs.updated_at,
+    # which the time-window filters above cannot. Backed by scrape_run_url.
+    scrape_run_id: int | None = None
 
     def with_overrides(self, **kw) -> "JobFilters":
         return replace(self, **kw)
@@ -164,6 +177,37 @@ def _build_where(
     if f.company:
         conditions.append("j.company = ?")
         params.append(f.company)
+
+    # Ingestion-time filters. Use j.first_seen_at for "newly observed"
+    # semantics and j.updated_at for "last touched" semantics (the
+    # per-scrape-run drill-down uses updated_at, since UPSERT bumps it
+    # for both inserts and refreshes).
+    #
+    # Both columns store SQLite's datetime('now') format ('YYYY-MM-DD HH:MM:SS',
+    # no T-separator, no microseconds, no tz). Callers pass Python ISO 8601
+    # strings ('YYYY-MM-DDTHH:MM:SS.ffffff+00:00'). Wrapping both sides in
+    # datetime() normalizes the form so string comparison is meaningful.
+    if f.first_seen_after:
+        conditions.append("datetime(j.first_seen_at) >= datetime(?)")
+        params.append(f.first_seen_after)
+    if f.first_seen_before:
+        conditions.append("datetime(j.first_seen_at) <= datetime(?)")
+        params.append(f.first_seen_before)
+    if f.updated_after:
+        conditions.append("datetime(j.updated_at) >= datetime(?)")
+        params.append(f.updated_after)
+    if f.updated_before:
+        conditions.append("datetime(j.updated_at) <= datetime(?)")
+        params.append(f.updated_before)
+
+    # Per-scrape-run filter. Subquery against the URL set this run captured
+    # at load time. Primary key (run_id, url) gives this an indexed lookup;
+    # combining with the ats filter narrows further via j.ats_type IN (...).
+    if f.scrape_run_id is not None:
+        conditions.append(
+            "j.url IN (SELECT url FROM scrape_run_url WHERE run_id = ?)"
+        )
+        params.append(f.scrape_run_id)
 
     # Role / seniority — title-only LIKE matching from the curated taxonomy.
     # Imported inline to avoid a circular import (roles.py is small / pure).

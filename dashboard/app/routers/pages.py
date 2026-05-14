@@ -168,6 +168,32 @@ def stats(request: Request):
     )
 
 
+@router.get("/scrape", response_class=HTMLResponse)
+def scrape(request: Request):
+    """Manual local-scraper console — invoke the vendored jobhive scrapers
+    and watch them progress live. Distinct from the daily jobhive cron path."""
+    if not settings.local_scraper_enabled:
+        raise HTTPException(404, "local scraper disabled")
+    return templates.TemplateResponse(
+        request,
+        "scrape.html",
+        {"transparency": _transparency()},
+    )
+
+
+@router.get("/scrape/runs/{run_id}", response_class=HTMLResponse)
+def scrape_run_detail(request: Request, run_id: int):
+    """360° view of one scrape run — all per-ATS counters, errors, and
+    subprocess logs. Alpine fetches the full detail JSON on mount."""
+    if not settings.local_scraper_enabled:
+        raise HTTPException(404, "local scraper disabled")
+    return templates.TemplateResponse(
+        request,
+        "scrape_detail.html",
+        {"transparency": _transparency(), "run_id": run_id},
+    )
+
+
 @router.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request):
     return templates.TemplateResponse(

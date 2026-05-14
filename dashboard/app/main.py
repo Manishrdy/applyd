@@ -7,38 +7,51 @@ jobs (list/search/facets/companies/detail), saved (CRUD), stats.
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import asynccontextmanager
 
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
 from app.database import get_db, init_db
+from app.logging_config import (
+    configure_logging,
+    log_http_request,
+    log_http_response,
+    request_payload,
+    response_payload,
+)
 from app.routers import jobs as jobs_router
 from app.routers import pages as pages_router
 from app.routers import saved as saved_router
+from app.routers import scrape as scrape_router
 from app.routers import settings as settings_router
 from app.routers import stats as stats_router
 from app.scheduler import start_scheduler, stop_scheduler
 from app.services.ingestion import run_ingestion
-
-logging.basicConfig(
-    level=settings.log_level,
-    format="%(asctime)s %(levelname)-7s %(name)s | %(message)s",
-    datefmt="%H:%M:%S",
+from app.services.scrape_runner import (
+    cleanup_orphans as cleanup_scrape_orphans,
+    cleanup_retention as cleanup_scrape_retention,
 )
+
+configure_logging(settings.log_level)
 log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    reclaimed = cleanup_scrape_orphans()
+    if reclaimed:
+        log.warning("reclaimed %d orphaned scrape run(s) from previous process", reclaimed)
+    cleanup_scrape_retention()
     start_scheduler()
     log.info("applyd dashboard ready")
     try:
@@ -69,7 +82,45 @@ app.include_router(jobs_router.router, prefix="/api/jobs", tags=["jobs"])
 app.include_router(saved_router.router, prefix="/api/saved", tags=["saved"])
 app.include_router(stats_router.router, prefix="/api/stats", tags=["stats"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
+app.include_router(scrape_router.router, prefix="/api/scrape", tags=["scrape"])
 app.include_router(pages_router.router, tags=["pages"])
+
+
+@app.middleware("http")
+async def logging_middleware(request: Request, call_next):
+    started = time.perf_counter()
+    req_payload = await request_payload(request)
+    log_http_request(log, request, req_payload)
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        log.exception(
+            "request failed method=%s path=%s elapsed_ms=%.2f",
+            request.method, request.url.path, elapsed_ms,
+        )
+        raise
+
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    if hasattr(response, "body_iterator") and response.body_iterator is not None:
+        body = b""
+        async for chunk in response.body_iterator:
+            body += chunk
+        res_payload = response_payload(response, body)
+        response = Response(
+            content=body,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type=response.media_type,
+            background=response.background,
+        )
+    else:
+        res_payload = response_payload(response)
+
+    log_http_response(log, request, response, elapsed_ms, res_payload)
+    return response
+
 
 # ---- error handlers ------------------------------------------------------
 # Themed 404/500 for HTML routes; JSON keeps the FastAPI default for /api/*.
@@ -83,6 +134,14 @@ def _is_api_request(request: Request) -> bool:
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    level = logging.WARNING if exc.status_code < 500 else logging.ERROR
+    log.log(
+        level,
+        "http exception path=%s status=%s detail=%s",
+        request.url.path,
+        exc.status_code,
+        exc.detail,
+    )
     if _is_api_request(request) or exc.status_code not in (404, 500):
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
     template = "errors/404.html" if exc.status_code == 404 else "errors/500.html"

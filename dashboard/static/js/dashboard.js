@@ -64,6 +64,14 @@ const DEFAULT_FILTERS = () => ({
   include_undated: true,
   roles: [],
   seniority: [],
+  // Ingestion-time filters (orthogonal to posted_hours).
+  // first_seen_after:  used by the "Freshly added (Nh)" preset.
+  // updated_after/before: used by the per-scrape-run drill-down on /scrape/runs/{id}.
+  first_seen_after: null,
+  first_seen_before: null,
+  updated_after: null,
+  updated_before: null,
+  scrape_run_id: null,
 });
 
 function dashboard() {
@@ -214,6 +222,22 @@ function dashboard() {
         const opt = POSTED_OPTIONS.find(o => o.value === this.filters.posted_hours);
         if (opt) chips.push({ label: opt.label.toLowerCase(), key: "posted_hours" });
       }
+      // Surface ingestion-time + per-run filters as their own chips. Labels
+      // adapt to the most user-meaningful framing:
+      // - scrape_run_id set → "scrape run #N" (drill-down from /scrape/runs)
+      // - first_seen_after alone (recent) → "freshly added (Nh)"
+      if (this.filters.scrape_run_id != null) {
+        const atsLabel = this.filters.ats.length === 1 ? ` · ${this.filters.ats[0]}` : "";
+        chips.push({
+          label: `scrape run #${this.filters.scrape_run_id}${atsLabel}`,
+          key: "scrape_run_id",
+        });
+      } else if (this.filters.first_seen_after) {
+        const h = Math.max(1, Math.round(
+          (Date.now() - new Date(this.filters.first_seen_after).getTime()) / 3600000
+        ));
+        chips.push({ label: `freshly added (${h}h)`, key: "freshly_added" });
+      }
       return chips;
     },
 
@@ -223,10 +247,40 @@ function dashboard() {
       else if (chip.key === "salary_min_usd") this.filters.salary_min_usd = null;
       else if (chip.key === "include_undated") this.filters.include_undated = true;
       else if (chip.key === "posted_hours") this.filters.posted_hours = 24;
-      else if (Array.isArray(this.filters[chip.key])) {
+      else if (chip.key === "freshly_added") {
+        this.filters.first_seen_after = null;
+        this.filters.first_seen_before = null;
+      } else if (chip.key === "scrape_run_id") {
+        this.filters.scrape_run_id = null;
+        // Also clear the ATS preselection that came with the drill-down
+        // so the user returns to a clean dashboard rather than ATS-only view.
+        this.filters.ats = [];
+      } else if (Array.isArray(this.filters[chip.key])) {
         this.filters[chip.key] = this.filters[chip.key].filter(v => v !== chip.value);
       }
       this.onFilterChange();
+    },
+
+    /* ---- preset: "freshly added in last N hours" -------- */
+    toggleFreshlyAdded(hours) {
+      // If currently set to roughly the same window, toggle off; else (re)set.
+      const target = new Date(Date.now() - hours * 3600 * 1000).toISOString();
+      if (this.filters.first_seen_after) {
+        this.filters.first_seen_after = null;
+        this.filters.first_seen_before = null;
+      } else {
+        this.filters.first_seen_after = target;
+        this.filters.first_seen_before = null;
+        // Free the posted-at window too — otherwise the result is the
+        // INTERSECTION (posted in last 24h AND ingested in last Nh), which
+        // is rarely what users want. The chip makes "no posted filter" obvious.
+        this.filters.posted_hours = 0;
+      }
+      this.onFilterChange();
+    },
+
+    freshlyAddedActive() {
+      return !!this.filters.first_seen_after && !this.filters.updated_after;
     },
 
     /* ---- save toggle ------------------------------------- */
@@ -262,6 +316,11 @@ function dashboard() {
       if (f.salary_min_usd) p.set("salary_min_usd", f.salary_min_usd);
       p.set("posted_hours", f.posted_hours);
       if (!f.include_undated) p.set("include_undated", "false");
+      if (f.first_seen_after)  p.set("first_seen_after",  f.first_seen_after);
+      if (f.first_seen_before) p.set("first_seen_before", f.first_seen_before);
+      if (f.updated_after)     p.set("updated_after",     f.updated_after);
+      if (f.updated_before)    p.set("updated_before",    f.updated_before);
+      if (f.scrape_run_id != null) p.set("scrape_run_id", f.scrape_run_id);
 
       for (const [k, v] of Object.entries(extras)) {
         if (Array.isArray(v)) v.forEach(x => p.append(k, x));
@@ -290,6 +349,11 @@ function dashboard() {
       if (p.has("salary_min_usd")) f.salary_min_usd = parseInt(p.get("salary_min_usd"), 10) || null;
       if (p.has("posted_hours")) f.posted_hours = parseInt(p.get("posted_hours"), 10) || 24;
       if (p.has("include_undated")) f.include_undated = p.get("include_undated") !== "false";
+      if (p.has("first_seen_after"))  f.first_seen_after  = p.get("first_seen_after");
+      if (p.has("first_seen_before")) f.first_seen_before = p.get("first_seen_before");
+      if (p.has("updated_after"))     f.updated_after     = p.get("updated_after");
+      if (p.has("updated_before"))    f.updated_before    = p.get("updated_before");
+      if (p.has("scrape_run_id"))     f.scrape_run_id     = parseInt(p.get("scrape_run_id"), 10) || null;
       if (p.has("sort")) this.sort = p.get("sort");
     },
 

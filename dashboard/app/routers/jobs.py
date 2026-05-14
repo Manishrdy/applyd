@@ -62,6 +62,11 @@ def list_jobs(
     company: Annotated[str | None, Query(description="Exact company match (use for drilldown from /companies)")] = None,
     role: Annotated[list[str] | None, Query(description="Curated role key (e.g. backend_engineer). Repeatable. See /api/jobs/roles for the catalog.")] = None,
     seniority: Annotated[list[str] | None, Query(description="Seniority key: junior | mid | senior | staff | principal. Repeatable.")] = None,
+    first_seen_after: Annotated[str | None, Query(description="ISO 8601 UTC. Show jobs whose first_seen_at >= this. Use for 'freshly added' (e.g. -6h).")] = None,
+    first_seen_before: Annotated[str | None, Query(description="ISO 8601 UTC. Show jobs whose first_seen_at <= this.")] = None,
+    updated_after: Annotated[str | None, Query(description="ISO 8601 UTC. Show jobs whose updated_at >= this. Use for 'rows touched by run X' drill-down.")] = None,
+    updated_before: Annotated[str | None, Query(description="ISO 8601 UTC. Show jobs whose updated_at <= this.")] = None,
+    scrape_run_id: Annotated[int | None, Query(description="Show only the URLs a given manual scrape run loaded. Joins scrape_run_url; immune to later UPSERTs on the same rows.")] = None,
     sort: Annotated[str, Query(description="newest | oldest | salary_high | salary_low | relevance")] = "newest",
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -83,6 +88,11 @@ def list_jobs(
         company=company,
         roles=tuple(role or ()),
         seniority=tuple(seniority or ()),
+        first_seen_after=first_seen_after,
+        first_seen_before=first_seen_before,
+        updated_after=updated_after,
+        updated_before=updated_before,
+        scrape_run_id=scrape_run_id,
     )
 
     offset = (page - 1) * limit
@@ -119,6 +129,11 @@ def facets(
     company: str | None = None,
     role: Annotated[list[str] | None, Query()] = None,
     seniority: Annotated[list[str] | None, Query()] = None,
+    first_seen_after: Annotated[str | None, Query()] = None,
+    first_seen_before: Annotated[str | None, Query()] = None,
+    updated_after: Annotated[str | None, Query()] = None,
+    updated_before: Annotated[str | None, Query()] = None,
+    scrape_run_id: Annotated[int | None, Query()] = None,
     facets_: Annotated[list[str] | None, Query(alias="facets", description="Which facet groups to compute")] = None,
     limit_per_facet: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> FacetsResponse:
@@ -138,6 +153,11 @@ def facets(
         company=company,
         roles=tuple(role or ()),
         seniority=tuple(seniority or ()),
+        first_seen_after=first_seen_after,
+        first_seen_before=first_seen_before,
+        updated_after=updated_after,
+        updated_before=updated_before,
+        scrape_run_id=scrape_run_id,
     )
 
     requested = [name for name in (facets_ or list(q.FACET_COLUMNS))

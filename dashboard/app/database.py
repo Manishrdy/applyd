@@ -103,6 +103,123 @@ CREATE TABLE IF NOT EXISTS manifest_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_manifest_log_fetched ON manifest_log(fetched_at DESC);
+
+-- Manual local-scraper runs (LocalScraperSource). Distinct from manifest_log,
+-- which is for the daily jobhive cron path. Manual scrape never prunes; the
+-- upsert path is the same (ON CONFLICT(url) DO UPDATE on jobs.url).
+CREATE TABLE IF NOT EXISTS scrape_run (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at            TEXT NOT NULL,
+    finished_at           TEXT,
+    status                TEXT NOT NULL,  -- queued | running | succeeded | partial | failed | cancelled
+    ats_requested         TEXT NOT NULL,  -- JSON array of ATS names
+    triggered_by          TEXT NOT NULL,  -- manual_ui | manual_api | cli
+    scraper_version       TEXT,           -- commit SHA from VENDORED_FROM at run time
+    max_companies_per_ats INTEGER,        -- bound applied for this run (NULL = unbounded)
+    incremental_enabled    INTEGER DEFAULT 0,
+    incremental_days       INTEGER,
+    preset_id              INTEGER,
+    total_scraped         INTEGER DEFAULT 0,
+    total_failed          INTEGER DEFAULT 0,
+    total_written         INTEGER DEFAULT 0,
+    total_inserted        INTEGER DEFAULT 0,
+    total_updated         INTEGER DEFAULT 0,
+    error                 TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_scrape_run_started ON scrape_run(started_at DESC);
+
+-- DB-level single-flight: at most one queued/running row exists at any time.
+-- Indexing the constant 1 (not `status`) is what enforces single-row: every
+-- row matching the WHERE clause would index the same value, so two rows
+-- collide regardless of whether their statuses differ (queued vs running).
+-- v1 indexed `status` itself which silently allowed queued+running pairs.
+DROP INDEX IF EXISTS idx_scrape_run_active;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scrape_run_active_v2
+    ON scrape_run((1))
+    WHERE status IN ('queued', 'running');
+
+CREATE TABLE IF NOT EXISTS scrape_run_ats (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id                   INTEGER NOT NULL REFERENCES scrape_run(id) ON DELETE CASCADE,
+    ats                      TEXT NOT NULL,
+    status                   TEXT NOT NULL,  -- pending | running | succeeded | failed | skipped | cancelled
+    started_at               TEXT,
+    finished_at              TEXT,
+    companies_total          INTEGER DEFAULT 0,
+    companies_succeeded      INTEGER DEFAULT 0,
+    companies_failed         INTEGER DEFAULT 0,
+    rows_scraped             INTEGER DEFAULT 0,
+    rows_failed              INTEGER DEFAULT 0,
+    rows_written             INTEGER DEFAULT 0,
+    rows_inserted            INTEGER DEFAULT 0,
+    rows_updated             INTEGER DEFAULT 0,
+    rows_skipped_safeguard   INTEGER DEFAULT 0,  -- non-zero if empty-result safeguard tripped
+    selected_companies       INTEGER DEFAULT 0,
+    phase                    TEXT DEFAULT 'pending',
+    phase_started_at         TEXT,
+    eta_seconds              INTEGER,
+    throughput_cpm           REAL,
+    error                    TEXT,
+    log_path                 TEXT,
+    UNIQUE(run_id, ats)
+);
+
+CREATE INDEX IF NOT EXISTS idx_scrape_run_ats_run ON scrape_run_ats(run_id);
+
+-- Per-run URL snapshot. Captures the exact set of jobs.url values this run's
+-- parquet contained at load time, so the /scrape/runs/{id} per-ATS drill-down
+-- can show the right rows regardless of subsequent writes (manifest cron,
+-- later manual runs) bumping jobs.updated_at on the same URLs.
+-- ON DELETE CASCADE drops these alongside the run when retention prunes.
+CREATE TABLE IF NOT EXISTS scrape_run_url (
+    run_id     INTEGER NOT NULL REFERENCES scrape_run(id) ON DELETE CASCADE,
+    ats        TEXT NOT NULL,
+    url        TEXT NOT NULL,
+    PRIMARY KEY (run_id, url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_scrape_run_url_run ON scrape_run_url(run_id);
+CREATE INDEX IF NOT EXISTS idx_scrape_run_url_run_ats ON scrape_run_url(run_id, ats);
+
+-- Per-company scrape state for fair rotation + incremental targeting.
+CREATE TABLE IF NOT EXISTS scrape_company_state (
+    ats               TEXT NOT NULL,
+    slug              TEXT NOT NULL,
+    name              TEXT,
+    source_url        TEXT,
+    last_scraped_at   TEXT,
+    last_run_id       INTEGER REFERENCES scrape_run(id) ON DELETE SET NULL,
+    last_status       TEXT,   -- succeeded | failed
+    success_count     INTEGER DEFAULT 0,
+    failure_count     INTEGER DEFAULT 0,
+    total_rows_scraped INTEGER DEFAULT 0,
+    PRIMARY KEY (ats, slug)
+);
+CREATE INDEX IF NOT EXISTS idx_scrape_company_state_ats_last
+    ON scrape_company_state(ats, last_scraped_at);
+
+-- Per-ATS round-robin cursor into source CSV ordering.
+CREATE TABLE IF NOT EXISTS scrape_ats_cursor (
+    ats               TEXT PRIMARY KEY,
+    next_index        INTEGER NOT NULL DEFAULT 0,
+    updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Saved run presets for the Scrape UI.
+CREATE TABLE IF NOT EXISTS scrape_preset (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                   TEXT NOT NULL UNIQUE,
+    ats_requested          TEXT NOT NULL, -- JSON array
+    max_companies_per_ats  INTEGER,
+    incremental_enabled    INTEGER NOT NULL DEFAULT 0,
+    incremental_days       INTEGER,
+    notes                  TEXT,
+    is_default             INTEGER NOT NULL DEFAULT 0,
+    created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_scrape_preset_default ON scrape_preset(is_default);
 """
 
 
@@ -132,6 +249,36 @@ def init_db(path: Path | None = None) -> None:
     """Create tables, indexes, and FTS5 virtual table if not present."""
     with get_db(path) as conn:
         conn.executescript(SCHEMA_SQL)
+        _migrate_schema(conn)
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {str(r["name"]) for r in rows}
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, ddl: str) -> None:
+    col = ddl.split()[0]
+    if col in _table_columns(conn, table):
+        return
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
+def _migrate_schema(conn: sqlite3.Connection) -> None:
+    """Lightweight additive migrations for existing local DBs."""
+    _ensure_column(conn, "scrape_run", "incremental_enabled INTEGER DEFAULT 0")
+    _ensure_column(conn, "scrape_run", "incremental_days INTEGER")
+    _ensure_column(conn, "scrape_run", "preset_id INTEGER")
+    _ensure_column(conn, "scrape_run", "total_inserted INTEGER DEFAULT 0")
+    _ensure_column(conn, "scrape_run", "total_updated INTEGER DEFAULT 0")
+
+    _ensure_column(conn, "scrape_run_ats", "rows_inserted INTEGER DEFAULT 0")
+    _ensure_column(conn, "scrape_run_ats", "rows_updated INTEGER DEFAULT 0")
+    _ensure_column(conn, "scrape_run_ats", "selected_companies INTEGER DEFAULT 0")
+    _ensure_column(conn, "scrape_run_ats", "phase TEXT DEFAULT 'pending'")
+    _ensure_column(conn, "scrape_run_ats", "phase_started_at TEXT")
+    _ensure_column(conn, "scrape_run_ats", "eta_seconds INTEGER")
+    _ensure_column(conn, "scrape_run_ats", "throughput_cpm REAL")
 
 
 def rebuild_fts(conn: sqlite3.Connection) -> None:

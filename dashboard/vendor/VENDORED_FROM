@@ -1,0 +1,26 @@
+repo:       https://github.com/kalil0321/ats-scrapers
+license:    MIT (see ats-scrapers/LICENSE)
+commit:     6dbb6227d5f84ca28d5ee6dbdc528c27a3c3679b
+commit_date: 2026-05-13T23:07:16Z
+vendored_at: 2026-05-14
+vendored_by: applyd dashboard (Gate 1 of local-scraper module)
+
+To bump:
+  cd dashboard/vendor
+  rm -rf ats-scrapers
+  gh api repos/kalil0321/ats-scrapers/tarball/<new-sha> > t.tgz
+  tar xzf t.tgz && mv kalil0321-ats-scrapers-* ats-scrapers && rm t.tgz
+  # then update commit / commit_date / vendored_at above
+  # and re-run the smoke test:
+  uv run --directory dashboard/vendor/ats-scrapers jobhive --help
+
+CLI shape (as of pinned SHA):
+  jobhive list-ats                 # ATS coverage from upstream manifest
+  jobhive scrape <ats> <company>   # scrape ONE company on ONE ATS
+  jobhive search                   # query the published dataset
+  jobhive publish                  # publish CSVs to R2 (upstream only)
+
+Note: there is no "scrape all companies on ATS X" CLI subcommand. The
+shim that Gate 4 introduces uses jobhive as a Python library to iterate
+ats-companies/<ats>.csv inside a single long-lived subprocess per ATS,
+rather than spawning one subprocess per company.

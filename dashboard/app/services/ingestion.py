@@ -636,17 +636,22 @@ def process_parquet(
     cutoff_ts: pd.Timestamp,
     fetched_cycle: str,
     batch_size: int,
-) -> tuple[int, int]:
-    """Stream a parquet, filter to last N days, upsert. Returns (seen, upserted)."""
+) -> tuple[int, int, int, int]:
+    """Stream a parquet, filter to last N days, upsert.
+
+    Returns (seen, upserted, inserted, updated).
+    """
     pf = pq.ParquetFile(str(parquet_path))
     schema_cols = set(pf.schema_arrow.names)
     cols_to_read = [c for c in JOB_COLUMNS if c in schema_cols]
     if "url" not in cols_to_read or "posted_at" not in cols_to_read:
         log.warning("[%s] parquet missing url or posted_at column, skipping", ats)
-        return 0, 0
+        return 0, 0, 0, 0
 
     total_seen = 0
     total_upserted = 0
+    total_inserted = 0
+    total_updated = 0
 
     for batch in pf.iter_batches(batch_size=batch_size, columns=cols_to_read):
         df = batch.to_pandas()
@@ -667,6 +672,18 @@ def process_parquet(
         if df.empty:
             continue
 
+        url_list = [str(u) for u in df["url"].tolist()]
+        unique_urls = sorted(set(url_list))
+        existing_urls: set[str] = set()
+        for i in range(0, len(unique_urls), 900):
+            chunk = unique_urls[i:i+900]
+            placeholders = ",".join("?" for _ in chunk)
+            rows_exist = conn.execute(
+                f"SELECT url FROM jobs WHERE url IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            existing_urls.update(str(r["url"]) for r in rows_exist if r["url"])
+
         rows = [_row_to_tuple(r, ats, fetched_cycle) for r in df.to_dict("records")]
         conn.execute("BEGIN")
         try:
@@ -675,9 +692,13 @@ def process_parquet(
         except Exception:
             conn.execute("ROLLBACK")
             raise
+        inserted = sum(1 for u in url_list if u not in existing_urls)
+        updated = len(rows) - inserted
         total_upserted += len(rows)
+        total_inserted += inserted
+        total_updated += updated
 
-    return total_seen, total_upserted
+    return total_seen, total_upserted, total_inserted, total_updated
 
 
 def prune_old(conn: sqlite3.Connection, days: int, current_cycle: str) -> int:
@@ -774,7 +795,7 @@ async def run_ingestion(
                     per_ats[ats] = {"status": "failed", "error": err, "seen": 0, "upserted": 0}
                     continue
                 try:
-                    seen, upserted = process_parquet(
+                    seen, upserted, _inserted, _updated = process_parquet(
                         path, ats, conn, cutoff_ts, fetched_cycle,
                         settings.ingest_batch_size,
                     )
