@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_components/macros.html" import button %}
+
+{% block title %}Server error{% endblock %}
+
+{% block main %}
+<div class="card p-12 text-center space-y-4 max-w-lg mx-auto mt-12">
+  <p class="text-6xl font-mono tabular text-danger leading-none">500</p>
+  <div class="space-y-1">
+    <h1 class="text-2xl font-semibold tracking-tight">Something broke</h1>
+    <p class="text-text-muted text-pretty">
+      An unexpected error happened on our end. Check the server log
+      (where uvicorn is running) for the traceback. Most fixes:
+    </p>
+    <ul class="text-left text-sm text-text-muted list-disc pl-5 max-w-sm mx-auto pt-2">
+      <li>Database missing or corrupt → <code>uv run python -m app.cli init-db</code></li>
+      <li>Empty DB → <code>uv run python -m app.cli ingest</code></li>
+      <li>Stale Tailwind CSS → rebuild with the watch script</li>
+    </ul>
+  </div>
+  <div class="flex justify-center gap-2 pt-2">
+    {{ button("Back to jobs", variant="primary", href="/") }}
+    {{ button("Settings",     variant="secondary", href="/settings") }}
+  </div>
+</div>
+{% endblock %}

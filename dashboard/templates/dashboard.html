@@ -108,6 +108,14 @@
       </div>
 
       <div class="flex items-center gap-2">
+        <a :href="'/api/jobs/export?' + buildParams({ sort: effectiveSort(), max_rows: 5000 })"
+           class="btn btn-secondary btn-sm"
+           title="Export current filter set as CSV (capped at 5000 rows)">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          CSV
+        </a>
         <label for="sort-select" class="text-sm text-text-muted">Sort</label>
         <select id="sort-select" class="input select py-1.5 pr-8 pl-3 text-sm w-auto"
                 x-model="sort" @change="onFilterChange()">

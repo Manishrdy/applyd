@@ -96,10 +96,30 @@ function savedPage() {
       try {
         const r = await fetch(`/api/saved/${item.id}`, { method: "DELETE" });
         if (!r.ok) throw new Error();
+        window.dispatchEvent(new CustomEvent("applyd:saved-changed", {
+          detail: { delta: -1 },
+        }));
       } catch {
         // restore on failure
         this.items.splice(idx, 0, removed);
         this.total += 1;
+      }
+    },
+
+    async saveNotes(item, value) {
+      const trimmed = (value || "").trim();
+      if (trimmed === (item.notes || "").trim()) return;
+      const prev = item.notes;
+      item.notes = trimmed || null;
+      try {
+        const r = await fetch(`/api/saved/${item.id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ notes: trimmed }),
+        });
+        if (!r.ok) throw new Error();
+      } catch {
+        item.notes = prev;
       }
     },
 

@@ -11,15 +11,19 @@ from contextlib import asynccontextmanager
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
 from app.database import get_db, init_db
 from app.routers import jobs as jobs_router
 from app.routers import pages as pages_router
 from app.routers import saved as saved_router
+from app.routers import settings as settings_router
 from app.routers import stats as stats_router
 from app.scheduler import start_scheduler, stop_scheduler
 from app.services.ingestion import run_ingestion
@@ -64,7 +68,37 @@ app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 app.include_router(jobs_router.router, prefix="/api/jobs", tags=["jobs"])
 app.include_router(saved_router.router, prefix="/api/saved", tags=["saved"])
 app.include_router(stats_router.router, prefix="/api/stats", tags=["stats"])
+app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
 app.include_router(pages_router.router, tags=["pages"])
+
+# ---- error handlers ------------------------------------------------------
+# Themed 404/500 for HTML routes; JSON keeps the FastAPI default for /api/*.
+
+_error_templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[1] / "templates"))
+
+
+def _is_api_request(request: Request) -> bool:
+    return request.url.path.startswith("/api/")
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    if _is_api_request(request) or exc.status_code not in (404, 500):
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    template = "errors/404.html" if exc.status_code == 404 else "errors/500.html"
+    return _error_templates.TemplateResponse(
+        request, template, {"transparency": None}, status_code=exc.status_code,
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    log.exception("unhandled error on %s", request.url.path)
+    if _is_api_request(request):
+        return JSONResponse({"detail": "internal server error"}, status_code=500)
+    return _error_templates.TemplateResponse(
+        request, "errors/500.html", {"transparency": None}, status_code=500,
+    )
 
 
 # ---- meta -----------------------------------------------------------------

@@ -21,6 +21,8 @@ router = APIRouter()
 
 
 _EFFECTIVE_DATE = "COALESCE(posted_at, first_seen_at)"
+# Future-date cap — used in every time-window stats query. See [[project-data-decisions]].
+_NOT_FUTURE = f"{_EFFECTIVE_DATE} <= datetime('now')"
 
 
 @router.get("/summary", response_model=StatsSummary)
@@ -34,13 +36,13 @@ def summary() -> StatsSummary:
             "SELECT COUNT(*) FROM jobs WHERE country = 'US'"
         ).fetchone()[0]
         us_24h = conn.execute(
-            f"SELECT COUNT(*) FROM jobs WHERE country='US' AND {_EFFECTIVE_DATE} >= datetime('now', '-24 hours')"
+            f"SELECT COUNT(*) FROM jobs WHERE country='US' AND {_EFFECTIVE_DATE} >= datetime('now', '-24 hours') AND {_NOT_FUTURE}"
         ).fetchone()[0]
         us_7d = conn.execute(
-            f"SELECT COUNT(*) FROM jobs WHERE country='US' AND {_EFFECTIVE_DATE} >= datetime('now', '-7 days')"
+            f"SELECT COUNT(*) FROM jobs WHERE country='US' AND {_EFFECTIVE_DATE} >= datetime('now', '-7 days') AND {_NOT_FUTURE}"
         ).fetchone()[0]
         us_30d = conn.execute(
-            f"SELECT COUNT(*) FROM jobs WHERE country='US' AND {_EFFECTIVE_DATE} >= datetime('now', '-30 days')"
+            f"SELECT COUNT(*) FROM jobs WHERE country='US' AND {_EFFECTIVE_DATE} >= datetime('now', '-30 days') AND {_NOT_FUTURE}"
         ).fetchone()[0]
         remote = conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE is_remote = 1"
@@ -78,7 +80,7 @@ def by_ats(
 ) -> GroupedCounts:
     sql = (
         f"SELECT ats_type AS label, COUNT(*) AS n FROM jobs "
-        f"WHERE ats_type IS NOT NULL"
+        f"WHERE ats_type IS NOT NULL AND {_NOT_FUTURE}"
     )
     params: list = []
     if days > 0:
@@ -130,7 +132,7 @@ def by_country(
 ) -> GroupedCounts:
     # GROUP BY country (not COALESCE) so SQLite can use idx_jobs_country_eff
     # for an index-only scan. Map NULL → "UNKNOWN" in Python.
-    sql = "SELECT country, COUNT(*) AS n FROM jobs WHERE 1=1"
+    sql = f"SELECT country, COUNT(*) AS n FROM jobs WHERE {_NOT_FUTURE}"
     params: list = []
     if days > 0:
         sql += f" AND {_EFFECTIVE_DATE} >= datetime('now', ?)"
@@ -150,7 +152,7 @@ def top_companies(
     country: str | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> GroupedCounts:
-    conditions = ["company IS NOT NULL", "company != ''"]
+    conditions = ["company IS NOT NULL", "company != ''", _NOT_FUTURE]
     params: list = []
     if country:
         conditions.append("country = ?")
@@ -184,7 +186,7 @@ def salary_range(
         (300_000, 500_000),
         (500_000, None),
     ]
-    conditions = ["salary_max_usd_annual IS NOT NULL"]
+    conditions = ["salary_max_usd_annual IS NOT NULL", _NOT_FUTURE]
     params: list = []
     if country:
         conditions.append("country = ?")
@@ -230,7 +232,7 @@ def remote_vs_onsite(
     country: str | None = "US",
     days: Annotated[int, Query(ge=0, le=30)] = 30,
 ) -> RemoteVsOnsite:
-    conditions: list[str] = []
+    conditions: list[str] = [_NOT_FUTURE]
     params: list = []
     if country:
         conditions.append("country = ?")
@@ -238,7 +240,7 @@ def remote_vs_onsite(
     if days > 0:
         conditions.append(f"{_EFFECTIVE_DATE} >= datetime('now', ?)")
         params.append(f"-{days} days")
-    where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+    where = " WHERE " + " AND ".join(conditions)
     with get_db() as conn:
         rows = conn.execute(
             f"SELECT is_remote, COUNT(*) AS n FROM jobs{where} GROUP BY is_remote",

@@ -166,3 +166,12 @@ def stats(request: Request):
         "stats.html",
         {"transparency": _transparency()},
     )
+
+
+@router.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request):
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {"transparency": _transparency()},
+    )

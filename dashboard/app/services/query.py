@@ -137,6 +137,14 @@ def _build_where(
         )
         params.append(f"-{f.posted_hours} hours")
 
+    # Always cap the effective date at "now" — a non-trivial number of upstream
+    # rows (Workday especially) have `posted_at` set to a future date like
+    # 2027-08-01, which would otherwise pollute every time-window query
+    # ("posted in the last 24h" matches them too because they're > any past
+    # cutoff). Filter at query time so the data stays available if we ever
+    # want to expose it via an explicit `?include_future=true` later.
+    conditions.append("COALESCE(j.posted_at, j.first_seen_at) <= datetime('now')")
+
     if not f.include_undated:
         conditions.append("j.posted_at IS NOT NULL")
 

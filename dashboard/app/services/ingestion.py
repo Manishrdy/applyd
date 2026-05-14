@@ -61,6 +61,17 @@ _USA_EXPLICIT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Three-part locations like "Ahmedabad, GJ, IN" or "Jakarta, JK, ID" use the
+# trailing 2-letter token as ISO country code, not US state code. Without
+# this filter, "IN" (India) matches Indiana, "ID" (Indonesia) matches Idaho,
+# etc. Run BEFORE the state-code regex.
+_NON_US_TRAILING_CC_RE = re.compile(
+    r",\s*[A-Z][A-Za-z]{0,4},\s*(?:IN|ID|DE|FR|GB|UK|IT|ES|NL|BE|CH|AT|SE|"
+    r"NO|DK|FI|PL|PT|CZ|GR|RO|IE|IL|AE|SG|HK|TW|TH|VN|MY|PH|JP|KR|CN|AU|"
+    r"NZ|BR|MX|AR|CL|CO|PE|ZA|EG|TR|RU|UA|CA|PK|BD|LK|EE|LV|LT|HU|SK|SI|"
+    r"HR|BG|RS|BA|MK|MD|BY|GE|AM|AZ|KZ|UZ|MN)\s*$"
+)
+
 # 2-letter state codes require comma context (e.g. "Wilmington, DE") so we
 # don't false-positive on bare ISO country codes like "DE" (Germany).
 _USA_STATE_CODE_RE = re.compile(
@@ -233,9 +244,12 @@ def strip_html(text: Any) -> str | None:
 def extract_country(location: Any) -> str | None:
     if not isinstance(location, str) or not location.strip():
         return None
-    # Negative filter first: if location names a non-US country/major city,
-    # don't tag as US even if it also matches a US-namesake city.
+    # Negative filters first: if location explicitly names a non-US
+    # country/major city OR ends with a non-US ISO country code in the
+    # 3-part "City, Region, CC" pattern, refuse to tag as US.
     if _NON_US_COUNTRY_RE.search(location):
+        return None
+    if _NON_US_TRAILING_CC_RE.search(location):
         return None
     for pat in USA_PATTERNS:
         if pat.search(location):

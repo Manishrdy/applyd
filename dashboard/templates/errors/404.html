@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "_components/macros.html" import button %}
+
+{% block title %}Not found{% endblock %}
+
+{% block main %}
+<div class="card p-12 text-center space-y-4 max-w-lg mx-auto mt-12">
+  <p class="text-6xl font-mono tabular text-text-subtle leading-none">404</p>
+  <div class="space-y-1">
+    <h1 class="text-2xl font-semibold tracking-tight">Page not found</h1>
+    <p class="text-text-muted text-pretty">
+      That URL doesn't match any route. If you got here by clicking a job card,
+      the listing may have aged out of the rolling 30-day window — try searching
+      from the dashboard.
+    </p>
+  </div>
+  <div class="flex justify-center gap-2 pt-2">
+    {{ button("Browse jobs", variant="primary",  href="/") }}
+    {{ button("Saved",       variant="secondary", href="/saved") }}
+  </div>
+</div>
+{% endblock %}

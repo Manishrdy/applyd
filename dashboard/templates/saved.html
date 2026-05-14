@@ -95,11 +95,29 @@
             </template>
           </div>
 
-          {# Notes preview #}
-          <template x-if="item.notes">
-            <p class="text-xs text-text-muted italic line-clamp-2 border-l-2 border-border-base pl-2"
-               x-text="item.notes"></p>
-          </template>
+          {# Notes — click to edit; Esc cancels, blur saves #}
+          <div class="text-xs"
+               @click.stop.prevent
+               x-data="{ editing: false, draft: '' }">
+            <template x-if="!editing">
+              <button type="button"
+                      class="w-full text-left text-text-muted italic border-l-2 border-border-base pl-2 py-0.5 hover:bg-surface-muted rounded-sm"
+                      @click="editing = true; draft = item.notes || ''; $nextTick(() => $refs.ta?.focus())"
+                      x-text="item.notes ? item.notes : '+ add notes'"
+                      :class="{ 'text-text-subtle': !item.notes }"></button>
+            </template>
+            <template x-if="editing">
+              <textarea x-ref="ta"
+                        x-model="draft"
+                        rows="3"
+                        @keydown.escape="editing = false"
+                        @keydown.meta.enter="saveNotes(item, draft); editing = false"
+                        @keydown.ctrl.enter="saveNotes(item, draft); editing = false"
+                        @blur="saveNotes(item, draft); editing = false"
+                        placeholder="Notes for MS2 (cmd+enter to save, esc to cancel)…"
+                        class="input w-full text-xs"></textarea>
+            </template>
+          </div>
 
           <div class="mt-auto flex items-end justify-between pt-2 border-t border-border-base">
             <span class="font-mono tabular text-sm text-text" x-text="formatSalary(item)"></span>

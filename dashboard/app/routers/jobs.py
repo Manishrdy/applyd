@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from app.config import settings
 from app.database import get_db
@@ -188,6 +191,63 @@ def companies(
     return CompaniesResponse(
         companies=[CompanyHit(company=r["company"], count=r["n"]) for r in rows]
     )
+
+
+CSV_COLUMNS = [
+    "id", "title", "company", "location", "country", "is_remote",
+    "ats_type", "salary_summary", "salary_min_usd_annual", "salary_max_usd_annual",
+    "salary_currency", "employment_type", "department", "team",
+    "posted_at", "first_seen_at", "apply_url", "url",
+]
+
+
+@router.get("/export", include_in_schema=False)
+def export_csv(
+    q_: Annotated[str | None, Query(alias="q")] = None,
+    country: Annotated[list[str] | None, Query()] = None,
+    ats: Annotated[list[str] | None, Query()] = None,
+    remote: bool | None = None,
+    employment_type: Annotated[list[str] | None, Query()] = None,
+    salary_min_usd: Annotated[int | None, Query(ge=0)] = None,
+    posted_hours: Annotated[int, Query(ge=0, le=720)] = 24,
+    include_undated: bool = True,
+    company: str | None = None,
+    sort: str = "newest",
+    max_rows: Annotated[int, Query(ge=1, le=10_000)] = 5_000,
+) -> StreamingResponse:
+    """Streamed CSV export using the same filters as /api/jobs/. Capped at
+    `max_rows` to keep the browser download bounded."""
+    sort_key = SORT_ALIASES.get(sort, "newest")
+    f = q.JobFilters(
+        q=q_,
+        country=tuple(country or ()),
+        ats=tuple(ats or ()),
+        remote=remote,
+        employment_type=tuple(employment_type or ()),
+        department=(),
+        salary_min_usd=salary_min_usd,
+        posted_hours=posted_hours,
+        include_undated=include_undated,
+        company=company,
+    )
+    sql, params = q.build_jobs_select(f, sort=sort_key, limit=max_rows, offset=0)
+
+    def generate():
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=CSV_COLUMNS, extrasaction="ignore")
+        w.writeheader()
+        yield buf.getvalue()
+        buf.seek(0); buf.truncate(0)
+
+        with get_db() as conn:
+            for row in conn.execute(sql, params):
+                rec = {k: row[k] for k in CSV_COLUMNS if k in row.keys()}
+                w.writerow(rec)
+                yield buf.getvalue()
+                buf.seek(0); buf.truncate(0)
+
+    headers = {"Content-Disposition": 'attachment; filename="applyd-jobs.csv"'}
+    return StreamingResponse(generate(), media_type="text/csv", headers=headers)
 
 
 @router.get("/{job_id}", response_model=JobDetail)

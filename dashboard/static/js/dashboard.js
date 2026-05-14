@@ -200,6 +200,10 @@ function dashboard() {
           method: was ? "DELETE" : "POST",
         });
         if (!r.ok) throw new Error();
+        // Notify the header counter (savedCounter listens for this)
+        window.dispatchEvent(new CustomEvent("applyd:saved-changed", {
+          detail: { delta: was ? -1 : +1 },
+        }));
       } catch {
         job.is_saved = was;       // rollback
       }

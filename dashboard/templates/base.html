@@ -37,6 +37,7 @@
 
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <script defer src="{{ url_for('static', path='js/theme.js') }}"></script>
+  <script defer src="{{ url_for('static', path='js/header.js') }}"></script>
 
   {% block head %}{% endblock %}
 </head>
@@ -92,13 +93,28 @@
         </svg>
       </a>
 
-      {# Saved-jobs link — direct to MS2 work queue. #}
+      {# Saved-jobs link — with count badge when > 0. #}
       <a href="/saved"
-         class="btn btn-ghost btn-icon"
+         class="btn btn-ghost btn-icon relative"
          title="Saved jobs"
-         aria-label="Saved jobs">
+         aria-label="Saved jobs"
+         x-data="savedCounter()" x-init="init()">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+        </svg>
+        <span x-show="count > 0"
+              x-text="count > 99 ? '99+' : count"
+              class="absolute -top-0.5 -right-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent text-accent-fg text-[10px] font-semibold px-1 tabular leading-none"></span>
+      </a>
+
+      {# Settings cog. #}
+      <a href="/settings"
+         class="btn btn-ghost btn-icon"
+         title="Settings"
+         aria-label="Settings">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
         </svg>
       </a>
 
@@ -153,6 +169,46 @@
       </div>
     </div>
   </footer>
+
+  {# ===== Command palette (⌘K / Ctrl+K) =============================== #}
+  <div x-data="commandPalette()" x-init="init()" @keydown.window="">
+    <div x-show="open"
+         x-transition.opacity
+         class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-start justify-center pt-[15vh] px-4"
+         @click="close()"
+         style="display: none;">
+      <div @click.stop
+           class="card card-elevated w-full max-w-xl overflow-hidden">
+        <div class="flex items-center gap-2 border-b border-border-base px-4 py-3">
+          <svg class="h-4 w-4 text-text-subtle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input x-ref="input"
+                 x-model="query"
+                 @keydown="onKey($event)"
+                 type="text"
+                 placeholder="Type a command or search…"
+                 class="bg-transparent flex-1 outline-none text-sm">
+          <kbd class="text-xs text-text-subtle border border-border-base rounded-sm px-1.5 py-0.5 font-mono">esc</kbd>
+        </div>
+        <div class="max-h-[50vh] overflow-y-auto py-2">
+          <template x-for="(item, i) in items()" :key="item.id">
+            <button type="button"
+                    @click="activate(i)"
+                    @mouseenter="cursor = i"
+                    class="w-full flex items-center justify-between gap-3 px-4 py-2 text-sm text-left"
+                    :class="cursor === i ? 'bg-surface-muted' : ''">
+              <span class="text-text" x-text="item.label"></span>
+              <span class="text-text-subtle text-xs font-mono" x-text="item.hint"></span>
+            </button>
+          </template>
+          <div x-show="!items().length" class="px-4 py-4 text-sm text-text-subtle">No matches.</div>
+        </div>
+        <div class="border-t border-border-base px-4 py-2 text-xs text-text-subtle flex justify-between">
+          <span><kbd class="font-mono">↑↓</kbd> navigate · <kbd class="font-mono">↵</kbd> select</span>
+          <span><kbd class="font-mono">⌘K</kbd> toggle</span>
+        </div>
+      </div>
+    </div>
+  </div>
 
   {% block scripts %}{% endblock %}
 </body>

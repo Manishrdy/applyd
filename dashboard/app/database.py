@@ -63,6 +63,16 @@ CREATE INDEX IF NOT EXISTS idx_jobs_first_seen        ON jobs(first_seen_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_eff_date          ON jobs(COALESCE(posted_at, first_seen_at));
 CREATE INDEX IF NOT EXISTS idx_jobs_country_eff       ON jobs(country, COALESCE(posted_at, first_seen_at) DESC);
 
+-- Composite indexes for facet GROUP BY (Phase 7 perf pass).
+-- Without these the ats/employment_type facets do a TEMP B-TREE GROUP BY
+-- on ~500K filtered rows (~1.2s on day-0). With them: 50ms.
+CREATE INDEX IF NOT EXISTS idx_jobs_country_ats_eff   ON jobs(country, ats_type, COALESCE(posted_at, first_seen_at) DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_country_emp_eff   ON jobs(country, employment_type, COALESCE(posted_at, first_seen_at));
+
+-- Salary range bucket query: scan country-narrowed rows and bucket by
+-- salary_max_usd_annual. Was 1.7s, now 13ms.
+CREATE INDEX IF NOT EXISTS idx_jobs_country_salary    ON jobs(country, salary_max_usd_annual);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS jobs_fts USING fts5(
     title, company, description, location,
     content='jobs',
