@@ -163,6 +163,34 @@ Example:
 
 ---
 
+## Release Process
+
+Use this workflow when publishing a new version (including `v1.0.0`):
+
+1. Ensure local quality checks pass:
+   ```bash
+   cd dashboard
+   uv sync
+   uv run --group dev pytest
+   ```
+2. Update release notes using:
+   - `.github/RELEASE_TEMPLATE.md`
+3. Commit changes on `main`.
+4. Create and push a semantic version tag:
+   ```bash
+   git tag -a vX.Y.Z -m "Release vX.Y.Z"
+   git push origin main
+   git push origin vX.Y.Z
+   ```
+5. In GitHub, create a Release from that tag and paste/fill notes from the template.
+
+For this repository, release notes should always call out:
+- Dashboard behavior changes (`/`, `/saved`, `/scrape`, `/stats`, `/settings`)
+- Data freshness/retention changes
+- Any schema/env var/upgrade steps
+
+---
+
 ## License
 
 MIT (this repository).  
