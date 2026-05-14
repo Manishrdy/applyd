@@ -136,6 +136,21 @@ def cmd_backfill_country(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sync_company_catalogs(args: argparse.Namespace) -> int:
+    from app.services.company_catalog_sync import sync_company_catalogs
+
+    result = asyncio.run(
+        sync_company_catalogs(
+            repo=args.repo,
+            ref=args.ref,
+            prune=args.prune,
+            dry_run=args.dry_run,
+        )
+    )
+    print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
 def main() -> int:
     _setup_logging()
     parser = argparse.ArgumentParser(prog="app.cli")
@@ -161,6 +176,33 @@ def main() -> int:
     p_bf.add_argument("--all", action="store_true",
                       help="re-tag every row, not just NULL/empty ones")
     p_bf.set_defaults(func=cmd_backfill_country)
+
+    p_sync = sub.add_parser(
+        "sync-company-catalogs",
+        help="sync vendored ats-companies/*.csv from upstream GitHub repo",
+    )
+    p_sync.add_argument(
+        "--repo",
+        default="kalil0321/ats-scrapers",
+        help="GitHub repo in owner/name format (default: kalil0321/ats-scrapers)",
+    )
+    p_sync.add_argument(
+        "--ref",
+        default="main",
+        help="branch, tag, or commit to pull from (default: main)",
+    )
+    p_sync.add_argument(
+        "--no-prune",
+        dest="prune",
+        action="store_false",
+        help="do not delete local CSV files that no longer exist upstream",
+    )
+    p_sync.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show summary without writing files",
+    )
+    p_sync.set_defaults(func=cmd_sync_company_catalogs, prune=True)
 
     args = parser.parse_args()
     return args.func(args)

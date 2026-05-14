@@ -135,6 +135,18 @@ Example:
 
 - `dashboard/vendor/ats-scrapers/ats-companies/ashby.csv`
 
+To refresh these catalogs from upstream:
+
+```bash
+cd dashboard
+uv run python -m app.cli sync-company-catalogs --dry-run
+uv run python -m app.cli sync-company-catalogs
+```
+
+This repository also includes a weekly GitHub Actions workflow
+(`.github/workflows/sync-ats-company-catalogs.yml`) that opens a PR when
+upstream ATS company CSVs change.
+
 ---
 
 ## Operational Notes
