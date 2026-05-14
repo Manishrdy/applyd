@@ -26,6 +26,32 @@ const SORT_OPTIONS = [
   { value: "relevance",   label: "Relevance",         requires_q: true },
 ];
 
+// Curated role taxonomy — keys must match app/services/roles.py::ROLES.
+const ROLE_OPTIONS = [
+  { value: "software_engineer",          label: "Software Engineer" },
+  { value: "senior_software_engineer",   label: "Senior Software Engineer" },
+  { value: "staff_plus_engineer",        label: "Staff+ Engineer" },
+  { value: "backend_engineer",           label: "Backend Engineer" },
+  { value: "frontend_engineer",          label: "Frontend Engineer" },
+  { value: "fullstack_engineer",         label: "Full-stack Engineer" },
+  { value: "ai_ml_engineer",             label: "AI / ML Engineer" },
+  { value: "forward_deployed_engineer",  label: "Forward Deployed Engineer" },
+  { value: "founding_engineer",          label: "Founding Engineer" },
+  { value: "product_engineer",           label: "Product Engineer" },
+  { value: "mobile_engineer",            label: "Mobile Engineer" },
+  { value: "data_engineer",              label: "Data Engineer" },
+  { value: "sre_platform_engineer",      label: "SRE / Platform" },
+  { value: "security_engineer",          label: "Security Engineer" },
+];
+
+const SENIORITY_OPTIONS = [
+  { value: "junior",    label: "Junior" },
+  { value: "mid",       label: "Mid" },
+  { value: "senior",    label: "Senior" },
+  { value: "staff",     label: "Staff" },
+  { value: "principal", label: "Principal+" },
+];
+
 const DEFAULT_FILTERS = () => ({
   q: "",
   country: ["US"],
@@ -36,6 +62,8 @@ const DEFAULT_FILTERS = () => ({
   salary_min_usd: null,
   posted_hours: 24,
   include_undated: true,
+  roles: [],
+  seniority: [],
 });
 
 function dashboard() {
@@ -61,6 +89,8 @@ function dashboard() {
     /* ---- constants exposed to template ------------------- */
     POSTED_OPTIONS,
     SORT_OPTIONS,
+    ROLE_OPTIONS,
+    SENIORITY_OPTIONS,
 
     /* ---- lifecycle --------------------------------------- */
     async init() {
@@ -164,6 +194,14 @@ function dashboard() {
         chips.push({ label: `ats: ${this.facetLabel("ats", a)}`, key: "ats", value: a }));
       this.filters.employment_type.forEach(e =>
         chips.push({ label: this.facetLabel("employment_type", e), key: "employment_type", value: e }));
+      (this.filters.roles || []).forEach(r => {
+        const opt = ROLE_OPTIONS.find(o => o.value === r);
+        chips.push({ label: opt ? opt.label : r, key: "roles", value: r });
+      });
+      (this.filters.seniority || []).forEach(s => {
+        const opt = SENIORITY_OPTIONS.find(o => o.value === s);
+        chips.push({ label: opt ? opt.label : s, key: "seniority", value: s });
+      });
       if (this.filters.remote === true)  chips.push({ label: "remote only", key: "remote" });
       if (this.filters.remote === false) chips.push({ label: "on-site only", key: "remote" });
       if (this.filters.salary_min_usd) {
@@ -219,6 +257,8 @@ function dashboard() {
       if (f.remote !== null) p.set("remote", f.remote);
       f.employment_type.forEach(e => p.append("employment_type", e));
       f.department.forEach(d => p.append("department", d));
+      (f.roles || []).forEach(r => p.append("role", r));
+      (f.seniority || []).forEach(s => p.append("seniority", s));
       if (f.salary_min_usd) p.set("salary_min_usd", f.salary_min_usd);
       p.set("posted_hours", f.posted_hours);
       if (!f.include_undated) p.set("include_undated", "false");
@@ -245,6 +285,8 @@ function dashboard() {
       if (p.has("remote")) f.remote = p.get("remote") === "true";
       if (p.has("employment_type")) f.employment_type = p.getAll("employment_type");
       if (p.has("department")) f.department = p.getAll("department");
+      if (p.has("role")) f.roles = p.getAll("role");
+      if (p.has("seniority")) f.seniority = p.getAll("seniority");
       if (p.has("salary_min_usd")) f.salary_min_usd = parseInt(p.get("salary_min_usd"), 10) || null;
       if (p.has("posted_hours")) f.posted_hours = parseInt(p.get("posted_hours"), 10) || 24;
       if (p.has("include_undated")) f.include_undated = p.get("include_undated") !== "false";

@@ -60,6 +60,8 @@ def list_jobs(
     posted_hours: Annotated[int, Query(ge=0, le=720, description="Effective-date window in hours; 0 = no time filter (max 720h = 30d, matches storage)")] = 24,
     include_undated: Annotated[bool, Query(description="Include rows where upstream posted_at is NULL (uses first_seen_at fallback)")] = True,
     company: Annotated[str | None, Query(description="Exact company match (use for drilldown from /companies)")] = None,
+    role: Annotated[list[str] | None, Query(description="Curated role key (e.g. backend_engineer). Repeatable. See /api/jobs/roles for the catalog.")] = None,
+    seniority: Annotated[list[str] | None, Query(description="Seniority key: junior | mid | senior | staff | principal. Repeatable.")] = None,
     sort: Annotated[str, Query(description="newest | oldest | salary_high | salary_low | relevance")] = "newest",
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -79,6 +81,8 @@ def list_jobs(
         posted_hours=posted_hours,
         include_undated=include_undated,
         company=company,
+        roles=tuple(role or ()),
+        seniority=tuple(seniority or ()),
     )
 
     offset = (page - 1) * limit
@@ -113,6 +117,8 @@ def facets(
     posted_hours: Annotated[int, Query(ge=0, le=720)] = 24,
     include_undated: bool = True,
     company: str | None = None,
+    role: Annotated[list[str] | None, Query()] = None,
+    seniority: Annotated[list[str] | None, Query()] = None,
     facets_: Annotated[list[str] | None, Query(alias="facets", description="Which facet groups to compute")] = None,
     limit_per_facet: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> FacetsResponse:
@@ -130,6 +136,8 @@ def facets(
         posted_hours=posted_hours,
         include_undated=include_undated,
         company=company,
+        roles=tuple(role or ()),
+        seniority=tuple(seniority or ()),
     )
 
     requested = [name for name in (facets_ or list(q.FACET_COLUMNS))

@@ -65,6 +65,10 @@ class JobFilters:
     posted_hours: int | None = 24
     include_undated: bool = True
     company: str | None = None
+    # Curated role / seniority taxonomies — match against j.title via LIKE
+    # patterns. See app/services/roles.py for the dictionaries.
+    roles: tuple[str, ...] = ()
+    seniority: tuple[str, ...] = ()
 
     def with_overrides(self, **kw) -> "JobFilters":
         return replace(self, **kw)
@@ -77,9 +81,14 @@ def sanitize_fts(q: str) -> str:
     """Strip anything that could confuse the FTS5 parser. Returns a query
     string safe to pass as a positional parameter to a `MATCH ?` clause.
 
-    Strategy: keep alphanumerics, underscores, hyphens, and whitespace.
-    Wrap each token in double quotes so phrase/AND semantics stay predictable.
-    Empty input → empty string (caller should treat as "no FTS").
+    For multi-word queries we build:
+
+        ("foo bar baz" OR ("foo" AND "bar" AND "baz"))
+
+    The phrase form ranks higher than the AND-of-tokens form, so when the
+    user sorts by relevance, exact-phrase title hits surface first. The OR
+    fallback keeps recall when the words don't appear adjacent. Empty input
+    → empty string (caller should treat as "no FTS").
     """
     cleaned = _FTS_SAFE_RE.sub(" ", q or "").strip()
     if not cleaned:
@@ -87,7 +96,11 @@ def sanitize_fts(q: str) -> str:
     tokens = [t for t in cleaned.split() if len(t) >= 2]
     if not tokens:
         return ""
-    return " ".join(f'"{t}"' for t in tokens)
+    if len(tokens) == 1:
+        return f'"{tokens[0]}"'
+    phrase = '"' + " ".join(tokens) + '"'
+    and_of_tokens = " AND ".join(f'"{t}"' for t in tokens)
+    return f"({phrase} OR ({and_of_tokens}))"
 
 
 def _build_where(
@@ -151,6 +164,22 @@ def _build_where(
     if f.company:
         conditions.append("j.company = ?")
         params.append(f.company)
+
+    # Role / seniority — title-only LIKE matching from the curated taxonomy.
+    # Imported inline to avoid a circular import (roles.py is small / pure).
+    if f.roles and skip != "roles":
+        from app.services.roles import role_clause
+        clause, role_params = role_clause(f.roles)
+        if clause:
+            conditions.append(clause)
+            params.extend(role_params)
+
+    if f.seniority and skip != "seniority":
+        from app.services.roles import seniority_clause
+        clause, sen_params = seniority_clause(f.seniority)
+        if clause:
+            conditions.append(clause)
+            params.extend(sen_params)
 
     return conditions, params
 

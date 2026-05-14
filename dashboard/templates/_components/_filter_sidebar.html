@@ -43,6 +43,46 @@
     </div>
   </fieldset>
 
+  {# ===== Role (curated software-eng taxonomy, title-only match) ===== #}
+  <fieldset class="space-y-2" x-data="{ expanded: false }">
+    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Role</legend>
+    <div class="space-y-1">
+      <template x-for="(opt, i) in ROLE_OPTIONS" :key="opt.value">
+        <label x-show="expanded || i < 7 || isChecked('roles', opt.value)"
+               class="flex items-center gap-2 px-1 py-1 cursor-pointer rounded-sm hover:bg-surface-muted">
+          <input type="checkbox"
+                 :checked="isChecked('roles', opt.value)"
+                 @change="toggleArrayFilter('roles', opt.value)"
+                 class="accent-accent">
+          <span class="text-sm truncate" x-text="opt.label"></span>
+        </label>
+      </template>
+    </div>
+    <button type="button"
+            x-show="ROLE_OPTIONS.length > 7"
+            @click="expanded = !expanded"
+            class="text-xs text-text-muted hover:text-text underline-offset-2 hover:underline">
+      <span x-show="!expanded">Show all (<span x-text="ROLE_OPTIONS.length"></span>)</span>
+      <span x-show="expanded">Show fewer</span>
+    </button>
+  </fieldset>
+
+  {# ===== Seniority (cross-cut on title) ===== #}
+  <fieldset class="space-y-2">
+    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Seniority</legend>
+    <div class="space-y-1">
+      <template x-for="opt in SENIORITY_OPTIONS" :key="opt.value">
+        <label class="flex items-center gap-2 px-1 py-1 cursor-pointer rounded-sm hover:bg-surface-muted">
+          <input type="checkbox"
+                 :checked="isChecked('seniority', opt.value)"
+                 @change="toggleArrayFilter('seniority', opt.value)"
+                 class="accent-accent">
+          <span class="text-sm" x-text="opt.label"></span>
+        </label>
+      </template>
+    </div>
+  </fieldset>
+
   {# ===== Remote (segmented) ===== #}
   <fieldset class="space-y-2">
     <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Work mode</legend>
