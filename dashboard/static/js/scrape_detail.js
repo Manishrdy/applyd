@@ -32,15 +32,28 @@ function scrapeDetailPage(runId) {
         this.logs[ats].open = false;
         return;
       }
-      this.logs[ats] = { open: true, loading: true, text: '', error: null };
+      this.logs[ats] = { open: true, loading: true, text: '', error: null, copied: false };
       try {
         const r = await fetch(`/api/scrape/runs/${this.runId}/logs/${ats}?tail_lines=500`);
         if (!r.ok) throw new Error(`http ${r.status}`);
         const text = await r.text();
-        this.logs[ats] = { open: true, loading: false, text, error: null };
+        this.logs[ats] = { open: true, loading: false, text, error: null, copied: false };
       } catch (e) {
-        this.logs[ats] = { open: true, loading: false, text: '', error: String(e) };
+        this.logs[ats] = { open: true, loading: false, text: '', error: String(e), copied: false };
       }
+    },
+
+    async copyLog(ats) {
+      const entry = this.logs[ats];
+      if (!entry || !entry.text) return;
+      try {
+        await navigator.clipboard.writeText(entry.text);
+        this.logs[ats] = { ...entry, copied: true };
+        setTimeout(() => {
+          const cur = this.logs[ats];
+          if (cur) this.logs[ats] = { ...cur, copied: false };
+        }, 1500);
+      } catch (_) {}
     },
 
     fmtNum(n) { if (n == null) return '—'; return Number(n).toLocaleString(); },

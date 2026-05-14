@@ -220,6 +220,13 @@ CREATE TABLE IF NOT EXISTS scrape_preset (
     updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_scrape_preset_default ON scrape_preset(is_default);
+
+-- Internal maintenance markers (vacuum cadence, etc.).
+CREATE TABLE IF NOT EXISTS app_maintenance (
+    key         TEXT PRIMARY KEY,
+    value       TEXT,
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -279,6 +286,11 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "scrape_run_ats", "phase_started_at TEXT")
     _ensure_column(conn, "scrape_run_ats", "eta_seconds INTEGER")
     _ensure_column(conn, "scrape_run_ats", "throughput_cpm REAL")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS app_maintenance ("
+        "key TEXT PRIMARY KEY, value TEXT, "
+        "updated_at TEXT NOT NULL DEFAULT (datetime('now')))"
+    )
 
 
 def rebuild_fts(conn: sqlite3.Connection) -> None:

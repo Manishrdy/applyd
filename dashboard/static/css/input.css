@@ -684,6 +684,61 @@
       hsl(var(--surface));
   }
 
+  /* ---- Settings redesign ----------------------------------- */
+  .settings-shell {
+    position: relative;
+    isolation: isolate;
+    padding-bottom: 1rem;
+  }
+
+  .settings-shell::before { content: none; }
+
+  .settings-hero-clean {
+    padding: 0.15rem 0.1rem 0.3rem;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .storage-section {
+    margin-top: 1rem;
+  }
+
+  .settings-section {
+    padding: 0.15rem;
+  }
+
+  .storage-section .metric-card {
+    border-color: hsl(var(--border));
+    background: hsl(var(--surface-elevated));
+  }
+
+  .storage-sync-row {
+    border-color: hsl(var(--border));
+    background: hsl(var(--surface-elevated));
+  }
+
+  .settings-actions-clean {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .settings-table-wrap {
+    border-color: hsl(var(--border-strong) / 0.65);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .settings-table-wrap thead tr {
+    background: hsl(var(--surface-muted) / 0.55);
+  }
+
+  .settings-note-card {
+    border-style: dashed;
+    border-color: hsl(var(--border-strong) / 0.7);
+    background: hsl(var(--surface-elevated) / 0.7);
+  }
+
   .coverage-detail {
     animation: reveal-up 320ms ease both;
   }

@@ -21,6 +21,7 @@ from app.schemas import (
     JobSummary,
     JobsListResponse,
 )
+from app.services import cache
 from app.services import query as q
 
 router = APIRouter()
@@ -75,6 +76,37 @@ def list_jobs(
     limit = min(limit, settings.max_page_size)
     sort_key = SORT_ALIASES.get(sort, "newest")
 
+    cache_payload = {
+        "q": q_,
+        "country": sorted(country or []),
+        "ats": sorted(ats or []),
+        "remote": remote,
+        "employment_type": sorted(employment_type or []),
+        "department": sorted(department or []),
+        "salary_min_usd": salary_min_usd,
+        "posted_hours": posted_hours,
+        "include_undated": include_undated,
+        "company": company,
+        "role": sorted(role or []),
+        "seniority": sorted(seniority or []),
+        "first_seen_after": first_seen_after,
+        "first_seen_before": first_seen_before,
+        "updated_after": updated_after,
+        "updated_before": updated_before,
+        "scrape_run_id": scrape_run_id,
+        "sort": sort_key,
+        "page": page,
+        "limit": limit,
+    }
+    ver = cache.jobs_cache_version()
+    cache_key = cache.make_jobs_key(cache_payload, version=ver)
+    cached = cache.get_json(cache_key)
+    if cached:
+        try:
+            return JobsListResponse.model_validate_json(cached)
+        except Exception:
+            pass
+
     f = q.JobFilters(
         q=q_,
         country=tuple(country or ()),
@@ -105,7 +137,7 @@ def list_jobs(
         saved_ids = _saved_ids_for(conn, [r["id"] for r in rows])
 
     jobs = [q.row_to_summary(r, saved_ids) for r in rows]
-    return JobsListResponse(
+    result = JobsListResponse(
         jobs=[JobSummary(**j) for j in jobs],
         page=page,
         limit=limit,
@@ -113,6 +145,8 @@ def list_jobs(
         has_more=(page * limit) < total,
         sort=sort_key,
     )
+    cache.set_json(cache_key, result.model_dump_json(), ttl_seconds=settings.redis_cache_ttl_seconds)
+    return result
 
 
 @router.get("/facets", response_model=FacetsResponse)

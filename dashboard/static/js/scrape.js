@@ -4,6 +4,7 @@ function scrapePage() {
     catalogError: null,
 
     selected: new Set(),
+    atsFilter: '',
     maxCompanies: null,
     incrementalEnabled: false,
     incrementalDays: 7,
@@ -160,9 +161,11 @@ function scrapePage() {
     isAllowed(ats) { return (this.catalog?.allowed || []).includes(ats); },
     maxAts() { return this.catalog?.max_ats_per_run ?? 5; },
     atLimit() { return this.selected.size >= this.maxAts(); },
+    canSelectMore() { return this.selected.size < this.maxAts(); },
 
     toggleAts(ats) {
       if (!this.isAllowed(ats)) return;
+      if (this.activeRunId !== null) return;
       if (this.selected.has(ats)) { this.selected.delete(ats); this.fetchCoverage(); return; }
       if (this.atLimit()) return;
       this.selected.add(ats);
@@ -170,6 +173,113 @@ function scrapePage() {
     },
 
     selectedList() { return [...this.selected].sort(); },
+
+    visibleAts() {
+      const all = this.catalog?.available || [];
+      const q = (this.atsFilter || '').trim().toLowerCase();
+      if (!q) return all;
+      return all.filter(a => a.toLowerCase().includes(q));
+    },
+
+    selectVisible() {
+      if (this.activeRunId !== null) return;
+      const list = this.visibleAts();
+      for (const a of list) {
+        if (this.atLimit()) break;
+        if (!this.isAllowed(a)) continue;
+        this.selected.add(a);
+      }
+      this.fetchCoverage();
+    },
+
+    clearSelected() {
+      if (this.activeRunId !== null) return;
+      this.selected.clear();
+      this.fetchCoverage();
+    },
+
+    tileTitle(ats) {
+      if (!this.isAllowed(ats)) return 'Not in allow-list (settings.local_scraper_allowed_ats)';
+      if (this.atLimit() && !this.selected.has(ats)) return `Max ${this.maxAts()} ATS per run`;
+      if (this.activeRunId !== null) return 'A run is in progress';
+      const cov = this.coverage?.[ats];
+      if (!cov) return ats;
+      const total = this.coverageTotal(ats);
+      return `${ats} · ${total} companies · ${cov.never || 0} never scraped`;
+    },
+
+    /** Returns a Tailwind class qualifier for the health dot on an ATS tile.
+     * Based on the "never scraped" share of companies. */
+    coverageHealth(ats) {
+      const cov = this.coverage?.[ats];
+      if (!cov) return '';
+      const total = this.coverageTotal(ats);
+      if (!total) return '';
+      const never = cov.never || 0;
+      const stale = cov.gt_30d || 0;
+      const ratio = (never + stale) / total;
+      if (ratio >= 0.6) return 'tile-dot-stale';
+      if (ratio >= 0.25) return 'tile-dot-warn';
+      return 'tile-dot-ok';
+    },
+
+    coverageTotal(ats) {
+      const c = this.coverage?.[ats] || {};
+      return (c.never || 0) + (c['0_1d'] || 0) + (c['2_7d'] || 0) + (c['8_30d'] || 0) + (c.gt_30d || 0);
+    },
+
+    coverageTooltip(ats) {
+      const c = this.coverage?.[ats] || {};
+      return `never ${c.never||0} · 0-1d ${c['0_1d']||0} · 2-7d ${c['2_7d']||0} · 8-30d ${c['8_30d']||0} · >30d ${c.gt_30d||0}`;
+    },
+
+    /** Live-readable label combining selected ATS count + max-companies cap. */
+    estimateCompaniesLabel() {
+      if (!this.selected.size) return '—';
+      if (this.maxCompanies && this.maxCompanies > 0) {
+        const cap = this.selected.size * Number(this.maxCompanies);
+        return `≤ ${cap.toLocaleString()}`;
+      }
+      // Sum total companies across selected ATS from coverage, when known.
+      let total = 0;
+      let known = 0;
+      for (const a of this.selected) {
+        const t = this.coverageTotal(a);
+        if (t > 0) { total += t; known++; }
+      }
+      if (known === this.selected.size && total > 0) {
+        return `≈ ${total.toLocaleString()}`;
+      }
+      return 'all';
+    },
+
+    /** Aggregate counters across the live perAts map. */
+    liveTotals() {
+      let total = 0, completed = 0, failed = 0, scraped = 0,
+          written = 0, inserted = 0, updated = 0;
+      for (const a of this.selected) {
+        const p = this.perAts[a] || {};
+        total      += p.companies_total || 0;
+        completed  += (p.companies_succeeded || 0) + (p.companies_failed || 0);
+        failed     += p.companies_failed || 0;
+        scraped    += p.rows_scraped || 0;
+        written    += p.rows_written || 0;
+        inserted   += p.rows_inserted || 0;
+        updated    += p.rows_updated || 0;
+      }
+      return { total, completed, failed, scraped, written, inserted, updated };
+    },
+
+    /** Short summary of the most recent finished run, for the header pill. */
+    lastRunSummary() {
+      const last = (this.runs || []).find(r => r.finished_at);
+      if (!last) return '';
+      const when = (() => {
+        try { return new Date(last.finished_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); }
+        catch { return last.finished_at; }
+      })();
+      return `${when} · ${last.status}`;
+    },
 
     canStart() {
       return this.selected.size > 0 && this.selected.size <= this.maxAts() && this.activeRunId === null && !this.catalogError;

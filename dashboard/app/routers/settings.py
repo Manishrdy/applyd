@@ -40,6 +40,8 @@ class SettingsInfo(BaseModel):
     # config
     rolling_window_days: int
     ingest_hour_utc: int
+    ingest_poll_interval_minutes: int
+    ingest_poll_end_hour_utc: int
     manifest_url: str
     download_concurrency: int
     debug: bool
@@ -78,6 +80,8 @@ def info() -> SettingsInfo:
         total_saved=total_saved,
         rolling_window_days=settings.rolling_window_days,
         ingest_hour_utc=settings.ingest_hour_utc,
+        ingest_poll_interval_minutes=settings.ingest_poll_interval_minutes,
+        ingest_poll_end_hour_utc=settings.ingest_poll_end_hour_utc,
         manifest_url=settings.manifest_url,
         download_concurrency=settings.download_concurrency,
         debug=settings.debug,

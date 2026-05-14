@@ -23,10 +23,23 @@ class Settings(BaseSettings):
     download_concurrency: int = 4
 
     ingest_hour_utc: int = 11
+    # If the daily 11:00 UTC run is skipped (manifest unchanged), run
+    # lightweight catch-up checks every N minutes until this UTC hour.
+    ingest_poll_interval_minutes: int = 30
+    ingest_poll_end_hour_utc: int = 17
     # 30-day cap on COALESCE(posted_at, first_seen_at). Prune drops anything older.
     # Storage matches UI: what we keep on disk = what users can query. No buffer.
     rolling_window_days: int = 30
     ingest_batch_size: int = 10_000
+    # Optional Redis cache for hot/read-heavy API responses.
+    redis_cache_enabled: bool = False
+    redis_url: str | None = None
+    redis_cache_ttl_seconds: int = 90
+    # SQLite space reclaim policy. DELETE frees logical space; VACUUM rewrites
+    # the file to return unused pages to disk. Guard with threshold+cadence.
+    db_vacuum_enabled: bool = True
+    db_vacuum_min_rows_pruned: int = 10_000
+    db_vacuum_min_interval_hours: int = 168  # weekly
 
     default_country: str = "US"
     default_posted_hours: int = 24

@@ -29,6 +29,7 @@ import pyarrow.parquet as pq
 
 from app.config import settings
 from app.database import get_db, optimize_fts, rebuild_fts
+from app.services import cache as cache_svc
 from app.services import manifest as manifest_svc
 
 log = logging.getLogger(__name__)
@@ -715,6 +716,41 @@ def prune_old(conn: sqlite3.Connection, days: int, current_cycle: str) -> int:
     return cur.rowcount
 
 
+def _last_vacuum_at(conn: sqlite3.Connection) -> datetime | None:
+    row = conn.execute(
+        "SELECT value FROM app_maintenance WHERE key='last_vacuum_at'"
+    ).fetchone()
+    if row is None or not row["value"]:
+        return None
+    try:
+        return datetime.fromisoformat(str(row["value"])).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _maybe_vacuum(conn: sqlite3.Connection, *, rows_pruned: int) -> bool:
+    if not settings.db_vacuum_enabled:
+        return False
+    if rows_pruned < max(0, int(settings.db_vacuum_min_rows_pruned)):
+        return False
+
+    now = datetime.now(timezone.utc)
+    last = _last_vacuum_at(conn)
+    min_hours = max(1, int(settings.db_vacuum_min_interval_hours))
+    if last is not None and (now - last).total_seconds() < (min_hours * 3600):
+        return False
+
+    # Flush and shrink sidecar WAL where possible before full rewrite.
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    conn.execute("VACUUM")
+    conn.execute(
+        "INSERT INTO app_maintenance(key, value, updated_at) VALUES('last_vacuum_at', ?, datetime('now')) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')",
+        (now.isoformat(),),
+    )
+    return True
+
+
 async def _download_all(
     manifest: dict[str, Any],
     ats_names: list[str],
@@ -812,6 +848,9 @@ async def run_ingestion(
             log.info("rebuilding FTS5 index")
             rebuild_fts(conn)
             optimize_fts(conn)
+            vacuumed = _maybe_vacuum(conn, rows_pruned=rows_pruned)
+            if vacuumed:
+                log.info("ran sqlite VACUUM after pruning %d rows", rows_pruned)
 
             duration = time.time() - t0
             conn.execute(
@@ -822,6 +861,7 @@ async def run_ingestion(
                  len(ats_names), total_upserted, rows_pruned, "success",
                  duration),
             )
+            cache_svc.bump_jobs_cache_version()
     except Exception as e:
         error = str(e)
         log.exception("ingestion failed")

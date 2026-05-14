@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
 from app.database import get_db
@@ -16,6 +18,69 @@ from app.services.manifest import latest_manifest_log
 log = logging.getLogger(__name__)
 
 _scheduler: AsyncIOScheduler | None = None
+_ingest_lock: asyncio.Lock | None = None
+
+
+def _utc_day_bounds_iso(day: date) -> tuple[str, str]:
+    start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+    end = datetime.fromtimestamp(start.timestamp() + 86_400, tz=timezone.utc)
+    return start.isoformat(), end.isoformat()
+
+
+def _get_ingest_lock() -> asyncio.Lock:
+    global _ingest_lock
+    if _ingest_lock is None:
+        _ingest_lock = asyncio.Lock()
+    return _ingest_lock
+
+
+def _window_start_iso(day: date) -> str:
+    return datetime(
+        day.year, day.month, day.day, settings.ingest_hour_utc, 0, 0, tzinfo=timezone.utc
+    ).isoformat()
+
+
+def _should_run_catchup_poll_now(now_utc: datetime) -> bool:
+    """True only when:
+    - we're inside the configured poll window,
+    - and today's 11:00+ ingestion history contains no success yet,
+    - and latest 11:00+ attempt is skipped (manifest unchanged).
+    """
+    if settings.ingest_poll_interval_minutes <= 0:
+        return False
+    if now_utc.hour < settings.ingest_hour_utc:
+        return False
+    if now_utc.hour > settings.ingest_poll_end_hour_utc:
+        return False
+
+    day = now_utc.date()
+    day_start_iso, day_end_iso = _utc_day_bounds_iso(day)
+    window_start_iso = _window_start_iso(day)
+
+    with get_db() as conn:
+        any_success = conn.execute(
+            "SELECT 1 FROM manifest_log "
+            "WHERE fetched_at >= ? AND fetched_at < ? "
+            "  AND fetched_at >= ? "
+            "  AND status = 'success' "
+            "LIMIT 1",
+            (day_start_iso, day_end_iso, window_start_iso),
+        ).fetchone()
+        if any_success is not None:
+            return False
+
+        latest = conn.execute(
+            "SELECT status FROM manifest_log "
+            "WHERE fetched_at >= ? AND fetched_at < ? "
+            "  AND fetched_at >= ? "
+            "ORDER BY id DESC LIMIT 1",
+            (day_start_iso, day_end_iso, window_start_iso),
+        ).fetchone()
+
+    if latest is None:
+        # No 11:00+ attempt recorded yet today.
+        return False
+    return latest["status"] == "skipped"
 
 
 def _has_any_jobs() -> bool:
@@ -44,7 +109,8 @@ def _last_ingest_utc_date() -> date | None:
 
 async def _run_daily() -> None:
     try:
-        result = await run_ingestion()
+        async with _get_ingest_lock():
+            result = await run_ingestion()
         log.info("daily ingestion: %s", result.get("status"))
     except Exception:
         log.exception("daily ingestion failed")
@@ -66,7 +132,8 @@ async def _run_if_stale() -> None:
     if not _has_any_jobs():
         log.info("startup: DB empty, running initial ingestion")
         try:
-            result = await run_ingestion()
+            async with _get_ingest_lock():
+                result = await run_ingestion()
             log.info("initial ingestion: %s", result.get("status"))
         except Exception:
             log.exception("initial ingestion failed")
@@ -80,12 +147,36 @@ async def _run_if_stale() -> None:
             last_date, today_utc,
         )
         try:
-            result = await run_ingestion()
+            async with _get_ingest_lock():
+                result = await run_ingestion()
             log.info("startup catch-up: %s", result.get("status"))
         except Exception:
             log.exception("startup catch-up ingestion failed")
     else:
         log.info("startup: already ingested today (%s), skipping", today_utc)
+
+
+async def _run_catchup_poll() -> None:
+    """Periodic post-11 UTC check.
+
+    Runs only when today's 11:00+ ingestion has only produced skipped results
+    so far (manifest unchanged) and no success yet.
+    """
+    now_utc = datetime.now(timezone.utc)
+    if not _should_run_catchup_poll_now(now_utc):
+        return
+
+    lock = _get_ingest_lock()
+    if lock.locked():
+        log.info("catch-up poll: ingestion already running, skipping this tick")
+        return
+
+    try:
+        async with lock:
+            result = await run_ingestion()
+        log.info("catch-up poll ingestion: %s", result.get("status"))
+    except Exception:
+        log.exception("catch-up poll ingestion failed")
 
 
 def start_scheduler() -> AsyncIOScheduler:
@@ -106,8 +197,20 @@ def start_scheduler() -> AsyncIOScheduler:
         id="startup_ingestion",
         replace_existing=True,
     )
+    _scheduler.add_job(
+        _run_catchup_poll,
+        trigger=IntervalTrigger(minutes=settings.ingest_poll_interval_minutes),
+        id="catchup_poll_ingestion",
+        replace_existing=True,
+        coalesce=True,
+    )
     _scheduler.start()
-    log.info("scheduler started (daily cron at %02d:00 UTC)", settings.ingest_hour_utc)
+    log.info(
+        "scheduler started (daily cron at %02d:00 UTC; catch-up poll every %dm until %02d:59 UTC on skipped days)",
+        settings.ingest_hour_utc,
+        settings.ingest_poll_interval_minutes,
+        settings.ingest_poll_end_hour_utc,
+    )
     return _scheduler
 
 
