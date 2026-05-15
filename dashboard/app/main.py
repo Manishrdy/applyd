@@ -10,9 +10,9 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from urllib.parse import quote
-
-import httpx
 from pathlib import Path
+
+import httpx  # kept for test monkeypatch compatibility during auth cutover
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,6 +40,7 @@ from app.routers import scrape as scrape_router
 from app.routers import settings as settings_router
 from app.routers import stats as stats_router
 from app.scheduler import start_scheduler, stop_scheduler
+from app.identity.routes import router as identity_router, verify_request_user
 from app.services.ingestion import run_ingestion
 from app.services.scrape_runner import (
     cleanup_orphans as cleanup_scrape_orphans,
@@ -89,6 +90,7 @@ app.include_router(stats_router.router, prefix="/api/stats", tags=["stats"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
 app.include_router(scrape_router.router, prefix="/api/scrape", tags=["scrape"])
 app.include_router(pages_router.router, tags=["pages"])
+app.include_router(identity_router, tags=["identity"])
 # Admin module — see app/admin/. Registered AFTER the regular routers so
 # its catchall doesn't shadow them, but its specific /admin/* routes still
 # match first because FastAPI uses the first registered match.
@@ -202,34 +204,16 @@ async def auth_middleware(request: Request, call_next):
     if is_public:
         return await call_next(request)
     if path.startswith(protected_prefixes):
-        token = request.cookies.get("applyd_session")
-        verified: dict | None = None
-        if token:
-            try:
-                async with httpx.AsyncClient(timeout=2.0) as client:
-                    verify_resp = await client.get(
-                        f"{settings.identity_service_url}/api/auth/verify",
-                        cookies={"applyd_session": token},
-                    )
-                if verify_resp.status_code == 200:
-                    verified = verify_resp.json()
-            except Exception:
-                verified = None
+        verified = verify_request_user(request)
         if verified is None:
             if path.startswith("/api/"):
                 return JSONResponse({"detail": "authentication required"}, status_code=401)
             target = str(request.url)
-            signin_url = f"{settings.identity_service_url}/signin?next={quote(target, safe='')}"
+            signin_url = f"/signin?next={quote(target, safe='')}"
             return RedirectResponse(url=signin_url, status_code=303)
         request.state.user_id = verified.get("user_id")
         request.state.user_email = verified.get("email")
         request.state.user_role = verified.get("role") or "user"
-    return await call_next(request)
-
-
-@app.middleware("http")
-async def bind_identity_service_url(request: Request, call_next):
-    request.state.identity_service_url = settings.identity_service_url.rstrip("/")
     return await call_next(request)
 
 

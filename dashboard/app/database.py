@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import sqlite3
 import threading
 import time
@@ -253,12 +254,67 @@ CREATE INDEX IF NOT EXISTS idx_admin_audit_action  ON admin_audit(action, create
 
 """
 
+IDENTITY_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL,
+    email         TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user','admin')),
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    public_id    TEXT NOT NULL UNIQUE,
+    token        TEXT PRIMARY KEY,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at   TEXT NOT NULL,
+    ip_address   TEXT,
+    user_agent   TEXT,
+    last_seen_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS auth_rate_limits (
+    bucket_key         TEXT PRIMARY KEY,
+    failed_attempts    INTEGER NOT NULL,
+    window_started_at  TEXT NOT NULL,
+    locked_until       TEXT
+);
+
+CREATE TABLE IF NOT EXISTS auth_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type  TEXT NOT NULL,
+    email       TEXT,
+    user_id     INTEGER,
+    ip_address  TEXT,
+    user_agent  TEXT,
+    success     INTEGER NOT NULL,
+    detail      TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_auth_events_created_at ON auth_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_auth_events_success ON auth_events(success, created_at);
+
+CREATE TABLE IF NOT EXISTS auth_policy (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_by  TEXT
+);
+"""
+
 
 def _connect(path: Path | None = None) -> sqlite3.Connection:
     p = Path(path) if path else settings.db_path
     p.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(p), isolation_level=None)
+    # Give concurrent writers time to finish before failing fast with
+    # "database is locked" during startup/background maintenance.
+    conn = sqlite3.connect(str(p), isolation_level=None, timeout=30.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -280,6 +336,7 @@ def init_db(path: Path | None = None) -> None:
     """Create tables, indexes, and FTS5 virtual table if not present."""
     with get_db(path) as conn:
         conn.executescript(SCHEMA_SQL)
+        conn.executescript(IDENTITY_SCHEMA_SQL)
         _migrate_schema(conn)
 
 
@@ -315,6 +372,20 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         "key TEXT PRIMARY KEY, value TEXT, "
         "updated_at TEXT NOT NULL DEFAULT (datetime('now')))"
     )
+    user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "role" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+    sess_columns = {row["name"] for row in conn.execute("PRAGMA table_info(auth_sessions)").fetchall()}
+    if "ip_address" not in sess_columns:
+        conn.execute("ALTER TABLE auth_sessions ADD COLUMN ip_address TEXT")
+    if "user_agent" not in sess_columns:
+        conn.execute("ALTER TABLE auth_sessions ADD COLUMN user_agent TEXT")
+    if "last_seen_at" not in sess_columns:
+        conn.execute("ALTER TABLE auth_sessions ADD COLUMN last_seen_at TEXT")
+    if "public_id" not in sess_columns:
+        conn.execute("ALTER TABLE auth_sessions ADD COLUMN public_id TEXT")
+        conn.execute("UPDATE auth_sessions SET public_id = lower(hex(randomblob(16))) WHERE public_id IS NULL")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_sessions_public_id ON auth_sessions(public_id)")
 
 
 def db_reclaimable_bytes(conn: sqlite3.Connection | None = None) -> int:
@@ -477,3 +548,55 @@ def rebuild_fts(conn: sqlite3.Connection) -> None:
 def optimize_fts(conn: sqlite3.Connection) -> None:
     """Compact the FTS5 index. Cheap, idempotent."""
     conn.execute("INSERT INTO jobs_fts(jobs_fts) VALUES('optimize')")
+
+
+def import_identity_db(src_path: Path | None = None) -> dict[str, int]:
+    """Idempotently import legacy identity-service tables into applyd DB."""
+    src = Path(src_path) if src_path else settings.identity_legacy_db_path
+    if not src.exists():
+        raise FileNotFoundError(f"legacy identity DB not found: {src}")
+    dst = settings.db_path
+    backup_dir = dst.parent / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(dst, backup_dir / f"{dst.stem}.pre_identity_import.db")
+    shutil.copy2(src, backup_dir / f"{src.stem}.source_identity.db")
+    with get_db() as conn:
+        conn.execute(f"ATTACH DATABASE '{src}' AS legacy_identity")
+        conn.execute("BEGIN")
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO users (id, name, email, password_hash, role, created_at) "
+                "SELECT id, name, lower(email), password_hash, COALESCE(role, 'user'), created_at "
+                "FROM legacy_identity.users"
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO auth_sessions (public_id, token, user_id, created_at, expires_at, ip_address, user_agent, last_seen_at) "
+                "SELECT COALESCE(public_id, lower(hex(randomblob(16)))), token, user_id, created_at, expires_at, ip_address, user_agent, last_seen_at "
+                "FROM legacy_identity.auth_sessions"
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO auth_rate_limits (bucket_key, failed_attempts, window_started_at, locked_until) "
+                "SELECT bucket_key, failed_attempts, window_started_at, locked_until "
+                "FROM legacy_identity.auth_rate_limits"
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO auth_events (id, event_type, email, user_id, ip_address, user_agent, success, detail, created_at) "
+                "SELECT id, event_type, email, user_id, ip_address, user_agent, success, detail, created_at "
+                "FROM legacy_identity.auth_events"
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO auth_policy (key, value, updated_at, updated_by) "
+                "SELECT key, value, updated_at, updated_by FROM legacy_identity.auth_policy"
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.execute("DETACH DATABASE legacy_identity")
+        return {
+            "users": int(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]),
+            "sessions": int(conn.execute("SELECT COUNT(*) FROM auth_sessions").fetchone()[0]),
+            "events": int(conn.execute("SELECT COUNT(*) FROM auth_events").fetchone()[0]),
+            "rate_limits": int(conn.execute("SELECT COUNT(*) FROM auth_rate_limits").fetchone()[0]),
+        }

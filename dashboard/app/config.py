@@ -14,7 +14,6 @@ class Settings(BaseSettings):
     app_port: int = 8000
     debug: bool = False
     log_level: str = "INFO"
-    identity_service_url: str = "http://localhost:8100"
 
     db_path: Path = Path("./data/applyd.db")
     cache_dir: Path = Path("./cache/parquet")
@@ -70,6 +69,33 @@ class Settings(BaseSettings):
     local_scraper_per_company_concurrency: int = 8
     scraper_log_retention_days: int = 14
     scrape_run_history_keep: int = 100
+
+    # In-process identity/auth settings.
+    session_cookie_name: str = "applyd_session"
+    session_ttl_days: int = 14
+    session_cookie_secure: bool = False
+    session_cookie_samesite: str = "lax"
+    session_cookie_domain: str | None = None
+    session_cookie_max_age_seconds: int | None = None
+    csrf_cookie_name: str = "applyd_csrf"
+    csrf_cookie_secure: bool = False
+    csrf_cookie_samesite: str = "strict"
+    redirect_allow_hosts: str = "localhost:8000,127.0.0.1:8000,0.0.0.0:8000"
+    auth_rate_limit_window_seconds: int = 300
+    auth_rate_limit_max_attempts: int = 5
+    auth_rate_limit_lockout_seconds: int = 600
+    auth_rate_limit_email_max_attempts: int = 15
+    auth_rate_limit_ip_max_attempts: int = 30
+    auth_signup_ip_max_attempts: int = 10
+    trusted_proxy_hops: int = 0
+    argon2_time_cost: int = 3
+    argon2_memory_cost_kib: int = 65536
+    argon2_parallelism: int = 4
+    argon2_hash_len: int = 32
+    argon2_salt_len: int = 16
+    password_pepper: str = "dev-only-change-me-in-production"
+    # One-time import source for legacy identity DB into applyd.db.
+    identity_legacy_db_path: Path = Path("./data/legacy/identity.db")
 
 
 settings = Settings()

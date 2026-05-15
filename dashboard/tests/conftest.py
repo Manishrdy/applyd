@@ -78,30 +78,10 @@ def test_db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return db_path
 
 
-def _install_identity_stub(monkeypatch: pytest.MonkeyPatch, payload: dict) -> None:
-    """Patch httpx.AsyncClient so auth_middleware sees the given identity."""
+def _install_identity_stub(monkeypatch: pytest.MonkeyPatch, payload: dict | None) -> None:
+    """Patch in-process auth resolver used by auth_middleware."""
     from app import main
-
-    class _FakeResponse:
-        status_code = 200
-
-        def json(self):
-            return payload
-
-    class _FakeAsyncClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def get(self, *args, **kwargs):
-            return _FakeResponse()
-
-    monkeypatch.setattr(main.httpx, "AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr(main, "verify_request_user", lambda request: payload)
 
 
 @pytest.fixture()
@@ -110,7 +90,6 @@ def client(test_db_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
     monkeypatch.setattr(main, "start_scheduler", lambda: None)
     monkeypatch.setattr(main, "stop_scheduler", lambda: None)
-    monkeypatch.setattr(settings, "identity_service_url", "http://identity.test")
 
     _install_identity_stub(
         monkeypatch,
@@ -129,7 +108,6 @@ def admin_client(test_db_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestCli
 
     monkeypatch.setattr(main, "start_scheduler", lambda: None)
     monkeypatch.setattr(main, "stop_scheduler", lambda: None)
-    monkeypatch.setattr(settings, "identity_service_url", "http://identity.test")
 
     _install_identity_stub(
         monkeypatch,
@@ -149,7 +127,7 @@ def anon_client(test_db_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClie
 
     monkeypatch.setattr(main, "start_scheduler", lambda: None)
     monkeypatch.setattr(main, "stop_scheduler", lambda: None)
-    monkeypatch.setattr(settings, "identity_service_url", "http://identity.test")
+    _install_identity_stub(monkeypatch, None)
 
     with TestClient(main.app, raise_server_exceptions=False) as test_client:
         yield test_client

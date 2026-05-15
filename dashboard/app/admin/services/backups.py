@@ -44,7 +44,7 @@ BACKUP_ROOT: Path = Path(__file__).resolve().parents[3] / "data" / "backups"
 _DASHBOARD_DIR = BACKUP_ROOT / "dashboard"
 _IDENTITY_DIR = BACKUP_ROOT / "identity"
 
-_IDENTITY_DB_PATH = Path(__file__).resolve().parents[4] / "identity-service" / "data" / "identity.db"
+_IDENTITY_DB_PATH = Path(__file__).resolve().parents[3] / "data" / "legacy" / "identity.db"
 
 _FILENAME_RE = re.compile(r"^[A-Za-z0-9_.-]+\.db$")
 

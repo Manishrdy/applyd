@@ -16,7 +16,7 @@ import logging
 import sys
 
 from app.config import settings
-from app.database import get_db, init_db
+from app.database import get_db, import_identity_db, init_db
 from app.logging_config import configure_logging
 
 
@@ -151,6 +151,13 @@ def cmd_sync_company_catalogs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_import_identity_db(args: argparse.Namespace) -> int:
+    init_db()
+    result = import_identity_db()
+    print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
 def main() -> int:
     _setup_logging()
     parser = argparse.ArgumentParser(prog="app.cli")
@@ -203,6 +210,12 @@ def main() -> int:
         help="show summary without writing files",
     )
     p_sync.set_defaults(func=cmd_sync_company_catalogs, prune=True)
+
+    p_import = sub.add_parser(
+        "import-identity-db",
+        help="one-time import of identity-service data into dashboard applyd.db",
+    )
+    p_import.set_defaults(func=cmd_import_identity_db)
 
     args = parser.parse_args()
     return args.func(args)

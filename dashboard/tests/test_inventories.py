@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 
-def test_all_api_endpoints_have_basic_coverage_smoke(client):
+def test_all_api_endpoints_have_basic_coverage_smoke(client, monkeypatch):
+    from app import main
+
+    async def _fake_ingest(*args, **kwargs):
+        return {"status": "success", "rows_ingested": 0}
+
+    monkeypatch.setattr(main, "run_ingestion", _fake_ingest)
+
     endpoints = [
         ("GET", "/api/health"),
         ("POST", "/api/ingest"),

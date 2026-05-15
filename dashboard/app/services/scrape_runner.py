@@ -97,14 +97,22 @@ def cleanup_retention() -> dict[str, int]:
     """
     runs_dropped = 0
     logs_dropped = 0
-    with get_db() as conn:
-        keep = max(int(settings.scrape_run_history_keep), 1)
-        cur = conn.execute(
-            "DELETE FROM scrape_run WHERE id NOT IN "
-            "(SELECT id FROM scrape_run ORDER BY id DESC LIMIT ?)",
-            (keep,),
-        )
-        runs_dropped = cur.rowcount or 0
+    try:
+        with get_db() as conn:
+            keep = max(int(settings.scrape_run_history_keep), 1)
+            cur = conn.execute(
+                "DELETE FROM scrape_run WHERE id NOT IN "
+                "(SELECT id FROM scrape_run ORDER BY id DESC LIMIT ?)",
+                (keep,),
+            )
+            runs_dropped = cur.rowcount or 0
+    except sqlite3.OperationalError as exc:
+        # Startup should not fail just because a concurrent writer briefly
+        # holds the DB lock; retention can run successfully on a later boot.
+        if "locked" in str(exc).lower():
+            log.warning("cleanup_retention: skipped DB prune due to lock: %s", exc)
+        else:
+            raise
 
     if _LOG_ROOT.exists():
         import time

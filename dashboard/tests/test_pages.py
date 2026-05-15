@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from app.config import settings
-
-
 HTML_ROUTES = [
     "/dashboard",
     "/placeholder",
@@ -41,9 +38,7 @@ def test_job_page_found_and_404(client):
     assert "text/html" in miss.headers["content-type"]
 
 
-def test_dashboard_redirects_when_logged_out(client):
-    client.cookies.clear()
-    res = client.get("/dashboard", follow_redirects=False)
+def test_dashboard_redirects_when_logged_out(anon_client):
+    res = anon_client.get("/dashboard", follow_redirects=False)
     assert res.status_code == 303
-    base = settings.identity_service_url.rstrip("/")
-    assert res.headers["location"].startswith(f"{base}/signin")
+    assert res.headers["location"].startswith("/signin")

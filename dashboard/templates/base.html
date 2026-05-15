@@ -146,7 +146,7 @@
         </svg>
         </button>
 
-        <form method="post" action="{{ request.state.identity_service_url }}/logout" class="inline-flex">
+        <form method="post" action="/logout" class="inline-flex">
           <input type="hidden" name="csrf_token" value="{{ request.cookies.get('applyd_csrf', '') }}">
           <button type="submit"
                   class="btn btn-ghost btn-icon"
