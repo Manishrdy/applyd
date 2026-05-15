@@ -31,6 +31,8 @@ from app.logging_config import (
     request_payload,
     response_payload,
 )
+from app.admin import register_admin
+from app.admin.services import maintenance as maintenance_service
 from app.routers import jobs as jobs_router
 from app.routers import pages as pages_router
 from app.routers import saved as saved_router
@@ -66,7 +68,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="applyd dashboard",
     description="MS1 — job search + filter dashboard over the jobhive dataset.",
-    version="0.2.0",
+    version="1.0.1",
     lifespan=lifespan,
 )
 
@@ -87,6 +89,10 @@ app.include_router(stats_router.router, prefix="/api/stats", tags=["stats"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
 app.include_router(scrape_router.router, prefix="/api/scrape", tags=["scrape"])
 app.include_router(pages_router.router, tags=["pages"])
+# Admin module — see app/admin/. Registered AFTER the regular routers so
+# its catchall doesn't shadow them, but its specific /admin/* routes still
+# match first because FastAPI uses the first registered match.
+register_admin(app)
 
 
 @app.middleware("http")
@@ -125,6 +131,51 @@ async def logging_middleware(request: Request, call_next):
     return response
 
 
+_MAINTENANCE_EXEMPT_PREFIXES = (
+    "/static/",
+    "/api/health",
+    "/admin",        # admin pages stay reachable so you can flip the flag back
+    "/api/admin",    # admin APIs likewise
+)
+
+
+# IMPORTANT (middleware ordering): Starlette wraps middleware such that the
+# LAST registered is the OUTERMOST. For maintenance_middleware to see
+# `request.state.user_role` (populated by auth_middleware), auth must run
+# FIRST on inbound — i.e. auth must be OUTER than maintenance. That means
+# auth must be REGISTERED AFTER maintenance below. Do not reorder these
+# two without re-walking the wrap math.
+@app.middleware("http")
+async def maintenance_middleware(request: Request, call_next):
+    """Block non-admin traffic when maintenance mode is on.
+
+    Sits inside auth_middleware so request.state.user_role is populated.
+    Public endpoints stay reachable so signed-out users get a clean 503
+    page instead of a redirect loop into signin.
+    """
+    path = request.url.path
+    if path == "/" or path.startswith(_MAINTENANCE_EXEMPT_PREFIXES):
+        return await call_next(request)
+    status = maintenance_service.get_status()
+    if not status.enabled:
+        return await call_next(request)
+    role = getattr(request.state, "user_role", None)
+    if role == "admin":
+        return await call_next(request)
+    payload = {
+        "detail": "service under maintenance",
+        "message": status.message or "We're making changes. Try again shortly.",
+    }
+    if path.startswith("/api/"):
+        return JSONResponse(payload, status_code=503)
+    return _error_templates.TemplateResponse(
+        request,
+        "errors/maintenance.html",
+        {"message": payload["message"]},
+        status_code=503,
+    )
+
+
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
@@ -142,6 +193,7 @@ async def auth_middleware(request: Request, call_next):
         "/settings",
         "/scrape",
         "/job/",
+        "/admin",
         "/api/",
     )
     if path == "/api/health":
@@ -151,23 +203,27 @@ async def auth_middleware(request: Request, call_next):
         return await call_next(request)
     if path.startswith(protected_prefixes):
         token = request.cookies.get("applyd_session")
-        authenticated = False
+        verified: dict | None = None
         if token:
             try:
                 async with httpx.AsyncClient(timeout=2.0) as client:
-                    verify = await client.get(
+                    verify_resp = await client.get(
                         f"{settings.identity_service_url}/api/auth/verify",
                         cookies={"applyd_session": token},
                     )
-                authenticated = verify.status_code == 200
+                if verify_resp.status_code == 200:
+                    verified = verify_resp.json()
             except Exception:
-                authenticated = False
-        if not authenticated:
+                verified = None
+        if verified is None:
             if path.startswith("/api/"):
                 return JSONResponse({"detail": "authentication required"}, status_code=401)
             target = str(request.url)
             signin_url = f"{settings.identity_service_url}/signin?next={quote(target, safe='')}"
             return RedirectResponse(url=signin_url, status_code=303)
+        request.state.user_id = verified.get("user_id")
+        request.state.user_email = verified.get("email")
+        request.state.user_role = verified.get("role") or "user"
     return await call_next(request)
 
 

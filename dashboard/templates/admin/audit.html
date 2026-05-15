@@ -1,0 +1,93 @@
+{% extends "admin/_layout.html" %}
+{% set admin_page_title = "Admin · Audit log" %}
+
+{% block admin_body %}
+<div x-data="adminAudit()" x-init="init()" class="space-y-4">
+
+  <header class="flex items-baseline justify-between">
+    <h1 class="text-xl font-semibold tracking-tight">Admin audit log</h1>
+    <button type="button" class="btn btn-secondary btn-sm" @click="reload()" :disabled="loading">
+      <span x-show="!loading">Refresh</span>
+      <span x-show="loading">Refreshing…</span>
+    </button>
+  </header>
+
+  <div x-show="error" x-cloak
+       class="card border-danger/40 bg-danger/10 text-danger px-4 py-3 text-sm" x-text="error"></div>
+
+  <section class="card p-3 flex flex-wrap gap-2 items-end">
+    <label class="space-y-1.5 flex-1 min-w-[8rem]">
+      <span class="text-xs font-medium text-text-subtle">Action filter</span>
+      <input class="input" x-model="filters.action" @change="reload()" placeholder="(any)">
+    </label>
+    <label class="space-y-1.5 flex-1 min-w-[8rem]">
+      <span class="text-xs font-medium text-text-subtle">Target filter</span>
+      <input class="input" x-model="filters.target" @change="reload()" placeholder="(any)">
+    </label>
+    <label class="space-y-1.5">
+      <span class="text-xs font-medium text-text-subtle">Limit</span>
+      <input type="number" class="input tabular w-24" min="1" max="500" x-model.number="filters.limit" @change="reload()">
+    </label>
+    <button class="btn btn-ghost btn-sm" @click="filters.action=''; filters.target=''; reload()">Clear</button>
+  </section>
+
+  <section class="card overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-text-subtle">
+        <tr class="border-b border-border-base">
+          <th class="text-left font-medium px-3 py-2">When</th>
+          <th class="text-left font-medium px-3 py-2">Admin</th>
+          <th class="text-left font-medium px-3 py-2">Action</th>
+          <th class="text-left font-medium px-3 py-2">Target</th>
+          <th class="text-left font-medium px-3 py-2">IP</th>
+          <th class="text-left font-medium px-3 py-2 hidden md:table-cell">Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="e in entries" :key="e.id">
+          <tr class="border-b border-border-base/60">
+            <td class="px-3 py-2 tabular text-text-subtle whitespace-nowrap" x-text="e.created_at"></td>
+            <td class="px-3 py-2" x-text="e.admin_email"></td>
+            <td class="px-3 py-2"><span class="badge" x-text="e.action"></span></td>
+            <td class="px-3 py-2 font-mono text-xs" x-text="e.target || '—'"></td>
+            <td class="px-3 py-2 tabular text-text-subtle" x-text="e.ip_address || '—'"></td>
+            <td class="px-3 py-2 hidden md:table-cell text-text-subtle truncate max-w-[24rem]" x-text="e.detail || ''"></td>
+          </tr>
+        </template>
+        <tr x-show="!entries.length && !loading">
+          <td colspan="6" class="px-3 py-6 text-center text-text-subtle">No audit entries match.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</div>
+{% endblock %}
+
+{% block admin_scripts %}
+<script>
+  function adminAudit() {
+    return {
+      loading: false,
+      error: "",
+      entries: [],
+      filters: { action: "", target: "", limit: 100 },
+      async init() { await this.reload(); },
+      async reload() {
+        this.loading = true;
+        this.error = "";
+        const params = new URLSearchParams();
+        if (this.filters.action) params.set("action", this.filters.action);
+        if (this.filters.target) params.set("target", this.filters.target);
+        params.set("limit", String(this.filters.limit || 100));
+        try {
+          this.entries = await window.adminApi.get("/api/admin/audit?" + params.toString());
+        } catch (e) {
+          this.error = e.message || "Failed to load audit log";
+        } finally {
+          this.loading = false;
+        }
+      },
+    };
+  }
+</script>
+{% endblock %}

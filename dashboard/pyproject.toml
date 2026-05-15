@@ -1,6 +1,6 @@
 [project]
 name = "applyd-dashboard"
-version = "0.1.0"
+version = "1.0.1"
 requires-python = ">=3.12"
 dependencies = [
     "apscheduler>=3.11.2",
@@ -21,3 +21,9 @@ dependencies = [
 dev = [
     "pytest>=8.4.0",
 ]
+
+[tool.pytest.ini_options]
+# Keep collection scoped to our suite — `vendor/` ships upstream test files
+# we don't run and that don't share our dependencies. Without this, a bare
+# `pytest` (as in the release workflow) walks into vendor and errors out.
+testpaths = ["tests"]

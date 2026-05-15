@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}Under maintenance{% endblock %}
+
+{% block main %}
+<section class="mx-auto max-w-xl py-16 text-center space-y-4">
+  <div class="inline-flex h-12 w-12 items-center justify-center rounded-full bg-warning/15 text-warning">
+    <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/>
+      <line x1="12" y1="8" x2="12" y2="12"/>
+      <line x1="12" y1="16" x2="12.01" y2="16"/>
+    </svg>
+  </div>
+  <h1 class="text-2xl font-semibold tracking-tight">Service under maintenance</h1>
+  <p class="text-text-muted">{{ message or "We're making changes. Try again shortly." }}</p>
+</section>
+{% endblock %}

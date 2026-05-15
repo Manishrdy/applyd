@@ -1,0 +1,51 @@
+{# Admin shared layout. Extends the main base.html so the dashboard header
+   and theme/footer stay consistent. Children override {% block admin_body %}.
+   The sidebar uses `active_page` to mark the current item.
+#}
+{% extends "base.html" %}
+
+{% block title %}{{ admin_page_title or "Admin" }}{% endblock %}
+
+{% block main %}
+<div class="grid gap-6 lg:grid-cols-[15rem_minmax(0,1fr)] items-start">
+  {# ---- Admin sidebar --------------------------------------------- #}
+  <aside class="card p-3 lg:sticky lg:top-20">
+    <p class="text-[11px] uppercase tracking-wider text-text-subtle px-2 pb-2">Admin</p>
+    {% set nav = [
+      ("home",          "/admin",             "Overview"),
+      ("sessions",      "/admin/sessions",    "Sessions"),
+      ("auth_log",      "/admin/auth-log",    "Failed logins"),
+      ("rate_limits",   "/admin/rate-limits", "Rate limits"),
+      ("maintenance",   "/admin/maintenance", "Maintenance"),
+      ("backups",       "/admin/backups",     "Backups"),
+      ("audit",         "/admin/audit",       "Audit log"),
+    ] %}
+    <ul class="space-y-0.5">
+      {% for key, href, label in nav %}
+      <li>
+        <a href="{{ href }}"
+           class="block px-2 py-1.5 rounded-base text-sm
+                  {% if active_page == key %}bg-surface-muted text-text font-medium
+                  {% else %}text-text-muted hover:bg-surface-muted hover:text-text{% endif %}">
+          {{ label }}
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="mt-4 border-t border-border-base pt-3 px-2 text-xs text-text-subtle">
+      Signed in as<br>
+      <span class="text-text">{{ admin.email or "(admin)" }}</span>
+    </div>
+  </aside>
+
+  {# ---- Page content ---------------------------------------------- #}
+  <div class="space-y-6 min-w-0">
+    {% block admin_body %}{% endblock %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('static', path='js/admin.js') }}"></script>
+{% block admin_scripts %}{% endblock %}
+{% endblock %}

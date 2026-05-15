@@ -6,7 +6,7 @@ from pathlib import Path
 from sqlite3 import IntegrityError
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -14,19 +14,32 @@ import hmac
 import secrets
 
 from app.auth import (
+    RateLimitPolicy,
+    admin_clear_failed_logins,
+    admin_list_failed_logins,
+    admin_list_locked_buckets,
+    admin_list_sessions,
+    admin_list_users,
+    admin_set_user_role,
+    admin_terminate_session,
+    admin_unlock_bucket,
     authenticate_user,
     clear_all_sessions,
     clear_signin_failures,
     clear_session,
     create_session,
     create_user,
+    get_rate_limit_policy,
     get_user_email,
+    get_user_role,
     is_signin_rate_limited,
     is_signup_rate_limited,
     list_active_sessions,
     log_auth_event,
     record_signin_failure,
     record_signup_attempt,
+    require_admin,
+    set_rate_limit_policy,
     validate_password_strength,
     validate_session,
 )
@@ -48,7 +61,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="applyd identity-service", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="applyd identity-service", version="1.0.1", lifespan=lifespan)
 
 _templates_dir = Path(__file__).resolve().parents[1] / "templates"
 _static_dir = Path(__file__).resolve().parents[1] / "static"
@@ -468,7 +481,14 @@ def verify(request: Request):
     user_id = validate_session(token)
     if user_id is None:
         return JSONResponse({"authenticated": False}, status_code=401)
-    return {"authenticated": True, "user_id": user_id}
+    role = get_user_role(user_id) or "user"
+    email = get_user_email(user_id)
+    return {
+        "authenticated": True,
+        "user_id": user_id,
+        "email": email,
+        "role": role,
+    }
 
 
 @app.get("/api/auth/sessions")
@@ -526,6 +546,195 @@ def revoke_all_sessions(
         detail=f"revoked={revoked}",
     )
     return {"revoked": revoked}
+
+
+# ---------------------------------------------------------------------------
+# Admin API — gated by cookie session + admin role. Mirrors the public
+# auth surface but with destructive operations. CSRF enforced on every
+# state-changing call.
+# ---------------------------------------------------------------------------
+
+
+def _require_admin_session(request: Request) -> int:
+    token = request.cookies.get(settings.session_cookie_name)
+    user_id = validate_session(token)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="authentication required")
+    require_admin(user_id)
+    return user_id
+
+
+@app.get("/api/admin/sessions")
+def admin_sessions(request: Request, limit: int = 200):
+    _require_admin_session(request)
+    return admin_list_sessions(limit=limit)
+
+
+@app.post("/api/admin/sessions/{public_id}/terminate")
+def admin_sessions_terminate(public_id: str, request: Request, csrf_token: str = Form("")):
+    admin_id = _require_admin_session(request)
+    if not _csrf_valid(request, csrf_token):
+        return JSONResponse({"detail": "invalid request"}, status_code=400)
+    ok = admin_terminate_session(public_id)
+    log_auth_event(
+        event_type="admin_terminate_session",
+        success=ok,
+        user_id=admin_id,
+        ip_address=_client_ip(request),
+        user_agent=_user_agent(request),
+        detail=f"public_id={public_id}",
+    )
+    if not ok:
+        return JSONResponse({"detail": "session not found"}, status_code=404)
+    return {"terminated": True, "public_id": public_id}
+
+
+@app.get("/api/admin/failed-logins")
+def admin_failed_logins(request: Request, limit: int = 100):
+    _require_admin_session(request)
+    return admin_list_failed_logins(limit=limit)
+
+
+@app.post("/api/admin/failed-logins/clear")
+def admin_failed_logins_clear(
+    request: Request,
+    csrf_token: str = Form(""),
+    email: str = Form(""),
+    ip_address: str = Form(""),
+):
+    admin_id = _require_admin_session(request)
+    if not _csrf_valid(request, csrf_token):
+        return JSONResponse({"detail": "invalid request"}, status_code=400)
+    cleared = admin_clear_failed_logins(
+        email=email.strip() or None,
+        ip_address=ip_address.strip() or None,
+    )
+    log_auth_event(
+        event_type="admin_clear_failed_logins",
+        success=True,
+        user_id=admin_id,
+        ip_address=_client_ip(request),
+        user_agent=_user_agent(request),
+        detail=f"cleared={cleared} email={email or '-'} ip={ip_address or '-'}",
+    )
+    return {"cleared": cleared}
+
+
+@app.get("/api/admin/rate-limits")
+def admin_rate_limits(request: Request):
+    _require_admin_session(request)
+    policy = get_rate_limit_policy()
+    return {
+        "policy": {
+            "pair_max": policy.pair_max,
+            "email_max": policy.email_max,
+            "ip_max": policy.ip_max,
+            "window_seconds": policy.window_seconds,
+            "lockout_seconds": policy.lockout_seconds,
+        },
+        "locked_buckets": admin_list_locked_buckets(),
+    }
+
+
+@app.post("/api/admin/rate-limits/policy")
+def admin_rate_limits_policy(
+    request: Request,
+    csrf_token: str = Form(""),
+    pair_max: int = Form(...),
+    email_max: int = Form(...),
+    ip_max: int = Form(...),
+    window_seconds: int = Form(...),
+    lockout_seconds: int = Form(...),
+):
+    admin_id = _require_admin_session(request)
+    if not _csrf_valid(request, csrf_token):
+        return JSONResponse({"detail": "invalid request"}, status_code=400)
+    # Defensive floors — runtime config that's too lax defeats the point.
+    if any(v < 1 for v in (pair_max, email_max, ip_max, window_seconds, lockout_seconds)):
+        return JSONResponse({"detail": "all values must be >= 1"}, status_code=400)
+    if pair_max > 100 or email_max > 1000 or ip_max > 1000:
+        return JSONResponse({"detail": "max attempts too high"}, status_code=400)
+    if window_seconds > 24 * 3600 or lockout_seconds > 24 * 3600:
+        return JSONResponse({"detail": "window/lockout too long"}, status_code=400)
+    policy = RateLimitPolicy(
+        pair_max=pair_max,
+        email_max=email_max,
+        ip_max=ip_max,
+        window_seconds=window_seconds,
+        lockout_seconds=lockout_seconds,
+    )
+    set_rate_limit_policy(policy, updated_by=str(admin_id))
+    log_auth_event(
+        event_type="admin_update_rate_limit_policy",
+        success=True,
+        user_id=admin_id,
+        ip_address=_client_ip(request),
+        user_agent=_user_agent(request),
+        detail=(
+            f"pair={pair_max} email={email_max} ip={ip_max} "
+            f"window={window_seconds} lockout={lockout_seconds}"
+        ),
+    )
+    return {"policy": policy.__dict__}
+
+
+@app.post("/api/admin/rate-limits/unlock")
+def admin_rate_limits_unlock(
+    request: Request,
+    csrf_token: str = Form(""),
+    bucket_key: str = Form(...),
+):
+    admin_id = _require_admin_session(request)
+    if not _csrf_valid(request, csrf_token):
+        return JSONResponse({"detail": "invalid request"}, status_code=400)
+    ok = admin_unlock_bucket(bucket_key)
+    log_auth_event(
+        event_type="admin_unlock_bucket",
+        success=ok,
+        user_id=admin_id,
+        ip_address=_client_ip(request),
+        user_agent=_user_agent(request),
+        detail=f"bucket_key={bucket_key}",
+    )
+    if not ok:
+        return JSONResponse({"detail": "bucket not found"}, status_code=404)
+    return {"unlocked": True, "bucket_key": bucket_key}
+
+
+@app.get("/api/admin/users")
+def admin_users(request: Request, limit: int = 200):
+    _require_admin_session(request)
+    return admin_list_users(limit=limit)
+
+
+@app.post("/api/admin/users/{user_id}/role")
+def admin_users_role(
+    user_id: int,
+    request: Request,
+    csrf_token: str = Form(""),
+    role: str = Form(...),
+):
+    admin_id = _require_admin_session(request)
+    if not _csrf_valid(request, csrf_token):
+        return JSONResponse({"detail": "invalid request"}, status_code=400)
+    if user_id == admin_id and role != "admin":
+        # Don't let an admin demote themselves into a lockout.
+        return JSONResponse({"detail": "cannot demote self"}, status_code=400)
+    try:
+        ok = admin_set_user_role(user_id, role)
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+    log_auth_event(
+        event_type="admin_set_role",
+        success=ok,
+        user_id=admin_id,
+        ip_address=_client_ip(request),
+        user_agent=_user_agent(request),
+        detail=f"target_user_id={user_id} role={role}",
+    )
+    if not ok:
+        return JSONResponse({"detail": "user not found"}, status_code=404)
+    return {"updated": True, "user_id": user_id, "role": role}
 
 
 @app.get("/api/health")

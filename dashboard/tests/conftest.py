@@ -78,16 +78,15 @@ def test_db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return db_path
 
 
-@pytest.fixture()
-def client(test_db_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def _install_identity_stub(monkeypatch: pytest.MonkeyPatch, payload: dict) -> None:
+    """Patch httpx.AsyncClient so auth_middleware sees the given identity."""
     from app import main
-
-    monkeypatch.setattr(main, "start_scheduler", lambda: None)
-    monkeypatch.setattr(main, "stop_scheduler", lambda: None)
-    monkeypatch.setattr(settings, "identity_service_url", "http://identity.test")
 
     class _FakeResponse:
         status_code = 200
+
+        def json(self):
+            return payload
 
     class _FakeAsyncClient:
         def __init__(self, *args, **kwargs):
@@ -104,6 +103,53 @@ def client(test_db_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
     monkeypatch.setattr(main.httpx, "AsyncClient", _FakeAsyncClient)
 
+
+@pytest.fixture()
+def client(test_db_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    from app import main
+
+    monkeypatch.setattr(main, "start_scheduler", lambda: None)
+    monkeypatch.setattr(main, "stop_scheduler", lambda: None)
+    monkeypatch.setattr(settings, "identity_service_url", "http://identity.test")
+
+    _install_identity_stub(
+        monkeypatch,
+        {"authenticated": True, "user_id": 1, "email": "user@test", "role": "user"},
+    )
+
     with TestClient(main.app, raise_server_exceptions=False) as test_client:
         test_client.cookies.set("applyd_session", "test-token")
+        yield test_client
+
+
+@pytest.fixture()
+def admin_client(test_db_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """Same shape as `client` but the identity stub returns role=admin."""
+    from app import main
+
+    monkeypatch.setattr(main, "start_scheduler", lambda: None)
+    monkeypatch.setattr(main, "stop_scheduler", lambda: None)
+    monkeypatch.setattr(settings, "identity_service_url", "http://identity.test")
+
+    _install_identity_stub(
+        monkeypatch,
+        {"authenticated": True, "user_id": 42, "email": "admin@test", "role": "admin"},
+    )
+
+    with TestClient(main.app, raise_server_exceptions=False) as test_client:
+        test_client.cookies.set("applyd_session", "admin-token")
+        test_client.cookies.set("applyd_csrf", "test-csrf")
+        yield test_client
+
+
+@pytest.fixture()
+def anon_client(test_db_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """No session cookie, no identity stub override — exercises the 401/redirect paths."""
+    from app import main
+
+    monkeypatch.setattr(main, "start_scheduler", lambda: None)
+    monkeypatch.setattr(main, "stop_scheduler", lambda: None)
+    monkeypatch.setattr(settings, "identity_service_url", "http://identity.test")
+
+    with TestClient(main.app, raise_server_exceptions=False) as test_client:
         yield test_client

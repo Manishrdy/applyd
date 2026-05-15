@@ -1,0 +1,148 @@
+{% extends "admin/_layout.html" %}
+{% set admin_page_title = "Admin · Rate limits" %}
+
+{% block admin_body %}
+<div x-data="adminRateLimits()" x-init="init()" class="space-y-4">
+
+  <header class="flex items-baseline justify-between">
+    <h1 class="text-xl font-semibold tracking-tight">Rate limits</h1>
+    <button type="button" class="btn btn-secondary btn-sm" @click="reload()" :disabled="loading">
+      <span x-show="!loading">Refresh</span>
+      <span x-show="loading">Refreshing…</span>
+    </button>
+  </header>
+
+  <div x-show="error" x-cloak
+       class="card border-danger/40 bg-danger/10 text-danger px-4 py-3 text-sm" x-text="error"></div>
+
+  {# ---- Policy editor ---------------------------------------- #}
+  <section class="card p-4 space-y-3">
+    <div class="flex items-baseline justify-between">
+      <h2 class="text-sm font-medium">Active policy</h2>
+      <p class="text-xs text-text-subtle">Stored in <code>auth_policy</code>; fallback is env-config.</p>
+    </div>
+    <form @submit.prevent="save()" class="grid gap-3 sm:grid-cols-3">
+      <label class="space-y-1.5">
+        <span class="text-sm font-medium">Per-(IP, email) max</span>
+        <input type="number" class="input tabular" min="1" max="100" x-model.number="form.pair_max">
+        <span class="text-xs text-text-subtle">Trips fastest. Default 5.</span>
+      </label>
+      <label class="space-y-1.5">
+        <span class="text-sm font-medium">Per-email max</span>
+        <input type="number" class="input tabular" min="1" max="1000" x-model.number="form.email_max">
+        <span class="text-xs text-text-subtle">Distributed cred-stuffing. Default 15.</span>
+      </label>
+      <label class="space-y-1.5">
+        <span class="text-sm font-medium">Per-IP max</span>
+        <input type="number" class="input tabular" min="1" max="1000" x-model.number="form.ip_max">
+        <span class="text-xs text-text-subtle">Email-rotating attacker. Default 30.</span>
+      </label>
+      <label class="space-y-1.5">
+        <span class="text-sm font-medium">Window (seconds)</span>
+        <input type="number" class="input tabular" min="1" max="86400" x-model.number="form.window_seconds">
+      </label>
+      <label class="space-y-1.5">
+        <span class="text-sm font-medium">Lockout (seconds)</span>
+        <input type="number" class="input tabular" min="1" max="86400" x-model.number="form.lockout_seconds">
+      </label>
+      <div class="flex items-end">
+        <button class="btn btn-primary w-full" :disabled="busy">
+          <span x-show="!busy">Save policy</span>
+          <span x-show="busy">Saving…</span>
+        </button>
+      </div>
+    </form>
+  </section>
+
+  {# ---- Locked buckets --------------------------------------- #}
+  <section class="card overflow-x-auto">
+    <header class="px-4 py-3 border-b border-border-base flex items-baseline justify-between">
+      <h2 class="text-sm font-medium">Locked-out buckets</h2>
+      <span class="text-xs text-text-subtle" x-text="(buckets.length || 0) + ' active'"></span>
+    </header>
+    <table class="w-full text-sm">
+      <thead class="text-text-subtle">
+        <tr class="border-b border-border-base">
+          <th class="text-left font-medium px-3 py-2">Bucket</th>
+          <th class="text-left font-medium px-3 py-2">Failed</th>
+          <th class="text-left font-medium px-3 py-2">Window started</th>
+          <th class="text-left font-medium px-3 py-2">Locked until</th>
+          <th class="text-right font-medium px-3 py-2"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="b in buckets" :key="b.bucket_key">
+          <tr class="border-b border-border-base/60">
+            <td class="px-3 py-2 font-mono text-xs" x-text="b.bucket_key"></td>
+            <td class="px-3 py-2 tabular" x-text="b.failed_attempts"></td>
+            <td class="px-3 py-2 tabular text-text-subtle" x-text="b.window_started_at"></td>
+            <td class="px-3 py-2 tabular text-text-subtle" x-text="b.locked_until"></td>
+            <td class="px-3 py-2 text-right">
+              <button class="btn btn-ghost btn-sm" @click="unlock(b)" :disabled="busyBucket === b.bucket_key">
+                <span x-show="busyBucket !== b.bucket_key">Unlock</span>
+                <span x-show="busyBucket === b.bucket_key">…</span>
+              </button>
+            </td>
+          </tr>
+        </template>
+        <tr x-show="!buckets.length && !loading">
+          <td colspan="5" class="px-3 py-6 text-center text-text-subtle">No locked-out buckets.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</div>
+{% endblock %}
+
+{% block admin_scripts %}
+<script>
+  function adminRateLimits() {
+    return {
+      loading: false,
+      busy: false,
+      busyBucket: null,
+      error: "",
+      form: { pair_max: 5, email_max: 15, ip_max: 30, window_seconds: 300, lockout_seconds: 600 },
+      buckets: [],
+      async init() { await this.reload(); },
+      async reload() {
+        this.loading = true;
+        this.error = "";
+        try {
+          const data = await window.adminApi.get("/api/admin/rate-limits");
+          if (data && data.policy) this.form = { ...this.form, ...data.policy };
+          this.buckets = data?.locked_buckets || [];
+        } catch (e) {
+          this.error = e.message || "Failed to load rate-limit state";
+        } finally {
+          this.loading = false;
+        }
+      },
+      async save() {
+        this.busy = true;
+        try {
+          await window.adminApi.post("/api/admin/rate-limits/policy", { ...this.form });
+          window.adminToast("Policy saved", "success");
+        } catch (e) {
+          window.adminToast(e.message || "Save failed", "error");
+        } finally {
+          this.busy = false;
+        }
+      },
+      async unlock(b) {
+        if (!confirm("Unlock bucket " + b.bucket_key + "?")) return;
+        this.busyBucket = b.bucket_key;
+        try {
+          await window.adminApi.post("/api/admin/rate-limits/unlock", { bucket_key: b.bucket_key });
+          window.adminToast("Bucket unlocked", "success");
+          await this.reload();
+        } catch (e) {
+          window.adminToast(e.message || "Unlock failed", "error");
+        } finally {
+          this.busyBucket = null;
+        }
+      },
+    };
+  }
+</script>
+{% endblock %}

@@ -1,0 +1,235 @@
+{% extends "admin/_layout.html" %}
+{% set admin_page_title = "Admin · Backups" %}
+
+{% block admin_body %}
+<div x-data="adminBackups()" x-init="init()" class="space-y-4">
+
+  <header class="flex items-baseline justify-between">
+    <h1 class="text-xl font-semibold tracking-tight">Backups</h1>
+    <button type="button" class="btn btn-secondary btn-sm" @click="reload()" :disabled="loading">
+      <span x-show="!loading">Refresh</span>
+      <span x-show="loading">Refreshing…</span>
+    </button>
+  </header>
+
+  <div x-show="error" x-cloak
+       class="card border-danger/40 bg-danger/10 text-danger px-4 py-3 text-sm" x-text="error"></div>
+
+  <div x-show="!tokenConfigured"
+       class="card border-warning/40 bg-warning/10 text-warning px-4 py-3 text-sm">
+    Download and restore are token-gated. Set <code>APPLYD_BACKUP_TOKEN</code> in the
+    environment and restart the dashboard to enable them.
+  </div>
+
+  {# ---- Create new backup --------------------------------- #}
+  <section class="card p-4 space-y-3">
+    <h2 class="text-sm font-medium">Create backup</h2>
+    <p class="text-xs text-text-subtle">
+      Uses SQLite's online <code>.backup()</code> API — safe to run while the service is live.
+    </p>
+    <div class="flex gap-2">
+      <button class="btn btn-primary" @click="createBackup('dashboard')" :disabled="busy">
+        Snapshot applyd.db
+      </button>
+      <button class="btn btn-secondary" @click="createBackup('identity')" :disabled="busy">
+        Snapshot identity.db
+      </button>
+    </div>
+  </section>
+
+  {# ---- Backups list ------------------------------------- #}
+  <section class="card overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-text-subtle">
+        <tr class="border-b border-border-base">
+          <th class="text-left font-medium px-3 py-2">Source</th>
+          <th class="text-left font-medium px-3 py-2">Filename</th>
+          <th class="text-left font-medium px-3 py-2">Size</th>
+          <th class="text-left font-medium px-3 py-2">Created</th>
+          <th class="text-right font-medium px-3 py-2"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="f in files" :key="f.source + '/' + f.filename">
+          <tr class="border-b border-border-base/60">
+            <td class="px-3 py-2">
+              <span class="badge" x-text="f.source"></span>
+            </td>
+            <td class="px-3 py-2 font-mono text-xs" x-text="f.filename"></td>
+            <td class="px-3 py-2 tabular text-text-subtle" x-text="fmtBytes(f.size_bytes)"></td>
+            <td class="px-3 py-2 tabular text-text-subtle" x-text="f.created_at"></td>
+            <td class="px-3 py-2 text-right space-x-1">
+              <button class="btn btn-ghost btn-sm" @click="openDownload(f)" :disabled="!tokenConfigured">Download</button>
+              <button class="btn btn-ghost btn-sm" @click="openRestore(f)" :disabled="!tokenConfigured">Restore</button>
+              <button class="btn btn-ghost btn-sm text-danger" @click="deleteFile(f)" :disabled="busyKey === keyOf(f)">Delete</button>
+            </td>
+          </tr>
+        </template>
+        <tr x-show="!files.length && !loading">
+          <td colspan="5" class="px-3 py-6 text-center text-text-subtle">No backups yet.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  {# ---- Download modal ----------------------------------- #}
+  <div x-show="downloadModal.open" x-cloak
+       class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm grid place-items-center px-4"
+       @click="downloadModal.open = false">
+    <div @click.stop class="card card-elevated max-w-md w-full p-5 space-y-3">
+      <h3 class="text-base font-semibold">Download backup</h3>
+      <p class="text-sm text-text-muted">Enter the backup token configured in the server environment.</p>
+      <form method="POST" :action="downloadModal.action">
+        <input type="hidden" name="csrf_token" :value="csrf()">
+        <input type="password" name="token" class="input" x-model="downloadModal.token" placeholder="APPLYD_BACKUP_TOKEN" required>
+        <div class="mt-3 flex justify-end gap-2">
+          <button type="button" class="btn btn-ghost btn-sm" @click="downloadModal.open = false">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Download</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {# ---- Restore modal ------------------------------------ #}
+  <div x-show="restoreModal.open" x-cloak
+       class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm grid place-items-center px-4"
+       @click="restoreModal.open = false">
+    <div @click.stop class="card card-elevated max-w-lg w-full p-5 space-y-3">
+      <h3 class="text-base font-semibold text-danger">Restore — destructive</h3>
+      <p class="text-sm">
+        This will replace the live
+        <code x-text="restoreModal.source"></code> database with this backup.
+        A pre-restore snapshot of the current DB will be taken automatically.
+      </p>
+      <ul class="text-xs text-text-subtle list-disc pl-5 space-y-1">
+        <li>Maintenance mode must be ON.</li>
+        <li>Backup token required.</li>
+        <li>Type the filename below to confirm.</li>
+      </ul>
+      <form @submit.prevent="confirmRestore()" class="space-y-2">
+        <label class="block">
+          <span class="text-xs text-text-subtle">Backup token</span>
+          <input type="password" class="input" x-model="restoreModal.token" required>
+        </label>
+        <label class="block">
+          <span class="text-xs text-text-subtle">Type the exact filename to confirm</span>
+          <input class="input font-mono text-xs" x-model="restoreModal.confirm" :placeholder="restoreModal.filename" required>
+        </label>
+        <div class="flex justify-end gap-2 pt-1">
+          <button type="button" class="btn btn-ghost btn-sm" @click="restoreModal.open = false">Cancel</button>
+          <button type="submit" class="btn btn-warning btn-sm"
+                  :disabled="busyKey === 'restore' || restoreModal.confirm !== restoreModal.filename">
+            <span x-show="busyKey !== 'restore'">Restore</span>
+            <span x-show="busyKey === 'restore'">Restoring…</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block admin_scripts %}
+<script>
+  function adminBackups() {
+    return {
+      loading: false,
+      busy: false,
+      busyKey: null,
+      error: "",
+      files: [],
+      tokenConfigured: {{ 'true' if token_configured else 'false' }},
+      downloadModal: { open: false, action: "", token: "" },
+      restoreModal: { open: false, source: "", filename: "", token: "", confirm: "" },
+      csrf() { return window.adminApi.csrfToken(); },
+      keyOf(f) { return f.source + "/" + f.filename; },
+      fmtBytes(n) {
+        if (!n) return "0 B";
+        const u = ["B","KB","MB","GB"];
+        let i = 0, v = n;
+        while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+        return v.toFixed(v < 10 ? 1 : 0) + " " + u[i];
+      },
+      async init() { await this.reload(); },
+      async reload() {
+        this.loading = true;
+        this.error = "";
+        try {
+          const data = await window.adminApi.get("/api/admin/backups");
+          this.files = data.files || [];
+          this.tokenConfigured = !!data.token_configured;
+        } catch (e) {
+          this.error = e.message || "Failed to load backups";
+        } finally {
+          this.loading = false;
+        }
+      },
+      async createBackup(source) {
+        if (this.busy) return;
+        this.busy = true;
+        try {
+          await window.adminApi.post("/api/admin/backups", { source });
+          window.adminToast("Backup created", "success");
+          await this.reload();
+        } catch (e) {
+          window.adminToast(e.message || "Backup failed", "error");
+        } finally {
+          this.busy = false;
+        }
+      },
+      async deleteFile(f) {
+        if (!confirm("Delete " + f.filename + "?")) return;
+        this.busyKey = this.keyOf(f);
+        try {
+          await window.adminApi.post(
+            "/api/admin/backups/" + f.source + "/" + encodeURIComponent(f.filename) + "/delete",
+          );
+          window.adminToast("Deleted", "success");
+          await this.reload();
+        } catch (e) {
+          window.adminToast(e.message || "Delete failed", "error");
+        } finally {
+          this.busyKey = null;
+        }
+      },
+      openDownload(f) {
+        this.downloadModal = {
+          open: true,
+          action: "/api/admin/backups/" + f.source + "/" + encodeURIComponent(f.filename) + "/download",
+          token: "",
+        };
+      },
+      openRestore(f) {
+        this.restoreModal = {
+          open: true,
+          source: f.source,
+          filename: f.filename,
+          token: "",
+          confirm: "",
+        };
+      },
+      async confirmRestore() {
+        if (this.restoreModal.confirm !== this.restoreModal.filename) return;
+        this.busyKey = "restore";
+        try {
+          const r = await window.adminApi.post(
+            "/api/admin/backups/" + this.restoreModal.source + "/" + encodeURIComponent(this.restoreModal.filename) + "/restore",
+            { token: this.restoreModal.token, confirm: this.restoreModal.confirm },
+          );
+          window.adminToast(
+            "Restored — safety snapshot: " + (r?.pre_restore_snapshot || "(none)"),
+            "success",
+          );
+          this.restoreModal.open = false;
+          await this.reload();
+        } catch (e) {
+          window.adminToast(e.message || "Restore failed", "error");
+        } finally {
+          this.busyKey = null;
+        }
+      },
+    };
+  }
+</script>
+{% endblock %}

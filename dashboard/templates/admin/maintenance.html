@@ -1,0 +1,110 @@
+{% extends "admin/_layout.html" %}
+{% set admin_page_title = "Admin · Maintenance" %}
+
+{% block admin_body %}
+<div x-data="adminMaintenance()" x-init="init()" class="space-y-4">
+
+  <header class="flex items-baseline justify-between">
+    <h1 class="text-xl font-semibold tracking-tight">Maintenance mode</h1>
+    <button type="button" class="btn btn-secondary btn-sm" @click="reload()" :disabled="loading">
+      <span x-show="!loading">Refresh</span>
+      <span x-show="loading">Refreshing…</span>
+    </button>
+  </header>
+
+  <div x-show="error" x-cloak
+       class="card border-danger/40 bg-danger/10 text-danger px-4 py-3 text-sm" x-text="error"></div>
+
+  <section class="card p-4 space-y-4">
+    <div class="flex items-center gap-3">
+      <span class="pill" :class="status.enabled ? 'border-warning/40 bg-warning/10 text-warning' : ''">
+        <span class="pill-dot" :style="status.enabled ? 'background:hsl(var(--warning))' : 'background:hsl(var(--success))'"></span>
+        <span x-text="status.enabled ? 'Maintenance ON — non-admins blocked' : 'Maintenance OFF — service open'"></span>
+      </span>
+    </div>
+
+    <p class="text-sm text-text-muted">
+      When enabled, non-admin traffic to protected routes returns a 503 with the
+      message below. Admins (you) keep full access so you can flip it back off.
+      Static assets, <code>/api/health</code>, and the admin panel are always exempt.
+    </p>
+
+    <div class="space-y-1.5">
+      <label class="text-sm font-medium">Message shown to users</label>
+      <input class="input" x-model="messageInput" placeholder="Be right back — applying database migration."
+             :disabled="status.enabled">
+      <p class="text-xs text-text-subtle">Editable only while maintenance is OFF, to keep the audit trail clean.</p>
+    </div>
+
+    <div class="flex gap-2">
+      <button class="btn btn-warning" @click="enable()" x-show="!status.enabled" :disabled="busy">
+        <span x-show="!busy">Enable maintenance</span>
+        <span x-show="busy">Enabling…</span>
+      </button>
+      <button class="btn btn-secondary" @click="disable()" x-show="status.enabled" :disabled="busy">
+        <span x-show="!busy">Disable maintenance</span>
+        <span x-show="busy">Disabling…</span>
+      </button>
+    </div>
+
+    <dl class="mt-3 grid grid-cols-2 gap-2 text-xs text-text-subtle">
+      <dt>Last toggled</dt>
+      <dd class="tabular text-text" x-text="status.updated_at || '—'"></dd>
+      <dt>Toggled by</dt>
+      <dd class="text-text" x-text="status.enabled_by || '—'"></dd>
+    </dl>
+  </section>
+</div>
+{% endblock %}
+
+{% block admin_scripts %}
+<script>
+  function adminMaintenance() {
+    return {
+      loading: false,
+      busy: false,
+      error: "",
+      messageInput: "",
+      status: { enabled: false, message: "", updated_at: null, enabled_by: null },
+      async init() { await this.reload(); },
+      async reload() {
+        this.loading = true;
+        this.error = "";
+        try {
+          this.status = await window.adminApi.get("/api/admin/maintenance");
+          this.messageInput = this.status.message || "";
+        } catch (e) {
+          this.error = e.message || "Failed to load status";
+        } finally {
+          this.loading = false;
+        }
+      },
+      async enable() {
+        if (!confirm("Enable maintenance mode? Non-admins will be blocked.")) return;
+        this.busy = true;
+        try {
+          this.status = await window.adminApi.post("/api/admin/maintenance/enable", {
+            message: this.messageInput,
+          });
+          window.adminToast("Maintenance mode ON", "success");
+        } catch (e) {
+          window.adminToast(e.message || "Enable failed", "error");
+        } finally {
+          this.busy = false;
+        }
+      },
+      async disable() {
+        this.busy = true;
+        try {
+          this.status = await window.adminApi.post("/api/admin/maintenance/disable");
+          window.adminToast("Maintenance mode OFF", "success");
+        } catch (e) {
+          window.adminToast(e.message || "Disable failed", "error");
+        } finally {
+          this.busy = false;
+        }
+      },
+    };
+  }
+</script>
+{% endblock %}

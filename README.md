@@ -27,13 +27,16 @@ A FastAPI + Jinja2 application for:
 - Filtering by recency, country, salary, employment type, remote, etc.
 - Saving jobs for later action
 - Running local scraper jobs with live progress, logs, and run history
+- Admin panel for system health, sessions, rate limits, maintenance mode, backups, and audit log (role-gated)
 
 ### Identity Service (active)
 A separate FastAPI service for:
 
 - Landing page
 - Sign in / Sign up / Logout
-- Session issuance and verification
+- Session issuance and verification (cookie-based, Argon2id + server-side pepper)
+- Per-IP / per-email / per-(IP, email) rate limiting with runtime-tunable policy
+- Role-gated admin API (`/api/admin/*`) for sessions, failed logins, rate limits, and user role management
 - Redirecting authenticated users into dashboard
 
 ### MS2: Auto-Apply Agent (planned)
@@ -66,22 +69,38 @@ A future service that will consume curated/saved jobs and automate application w
 - View per-ATS logs and run outcomes
 - Preserve upsert safety (manual runs are additive; no prune)
 
+### 5) Admin panel (`/admin`)
+- Live health overview via Server-Sent Events with polling fallback
+- Active-session viewer and per-session termination
+- Failed-login viewer with scoped or broad rate-limit clear
+- Runtime-editable rate-limit policy + locked-bucket unlock
+- Site-wide maintenance-mode toggle (admins bypass, everyone else gets a 503 page)
+- Backup management: atomic SQLite `.backup()` snapshots, token-gated download, safety-snapshotted restore
+- Tamper-evident admin audit log for every state-changing action
+- Catchall 404 for unknown `/admin/*` paths so misroutes never leak to the public 404
+
 ---
 
 ## Architecture at a glance
 
 ```text
 Identity Service (:8100)
-  - Landing/Auth pages
-  - users + auth_sessions
-          |
+  - Landing / Auth pages
+  - users + auth_sessions + auth_events + auth_rate_limits + auth_policy
+  - /api/auth/verify  → { authenticated, user_id, email, role }
+  - /api/admin/*      → sessions, failed-logins, rate-limits, users
+          ^
+          | (cookie forwarded by dashboard's HTTP client)
           v
 Dashboard Service (:8000)
   - Protected UI + APIs
-  - Verifies session with identity-service
+  - auth middleware writes user_id / email / role onto request.state
+  - maintenance middleware 503s non-admins when the flag is on
+  - /admin/*       → admin pages (HTML)
+  - /api/admin/*   → admin JSON API + SSE stream
           |
           v
-SQLite (jobs, saved_jobs, logs, scrape runs)
+SQLite (jobs, saved_jobs, manifest_log, scrape_run*, app_maintenance, admin_audit)
 ```
 
 ### Important data paths
@@ -175,6 +194,14 @@ cp .env.example .env
 
 Update `.env` as needed for your machine. For local development, defaults are typically enough.
 
+If you plan to use the admin **Backups** page (download or restore database snapshots), set a backup token in the dashboard's environment:
+
+```bash
+export APPLYD_BACKUP_TOKEN="$(openssl rand -hex 32)"
+```
+
+When unset, the admin UI shows a warning and the download/restore endpoints return 503. Listing, creating, and deleting backups still work without a token.
+
 ### 5) Start Redis (Docker)
 
 ```bash
@@ -246,7 +273,21 @@ Runtime flow in browser:
 2. `http://localhost:8100/signin` or `/signup` -> auth
 3. Successful login/signup redirects to `http://localhost:8000/dashboard`
 
-### 8) Trigger ingest manually (optional)
+### 8) Promote yourself to admin (one-time)
+
+After signing up, grant your account the admin role so `/admin` becomes available. Run this from `identity-service/`:
+
+```bash
+cd identity-service
+uv run python -m app.cli list-users
+uv run python -m app.cli set-role you@example.com admin
+```
+
+The dashboard header shows an "Admin" icon for admin users only. Hit [http://localhost:8000/admin](http://localhost:8000/admin) once promoted. Non-admin users hitting `/admin/*` get a 403; signed-out users are redirected to signin.
+
+To demote later, run `set-role you@example.com user`. The CLI refuses to demote a user whose ID matches yours through the admin API, but the CLI has no such guard — be careful not to lock yourself out.
+
+### 9) Trigger ingest manually (optional)
 
 CLI:
 
@@ -264,6 +305,7 @@ Notes:
 
 - Scheduler runs daily ingestion at `11:00 UTC`.
 - Every ingestion attempt (scheduled, catch-up, or manual) also syncs ATS company catalogs in parallel.
+- Admins can also trigger ingestion from `/admin` — every admin-triggered action is recorded in `admin_audit`.
 
 ---
 
@@ -303,6 +345,79 @@ Additionally, every ingestion attempt (`11:00 UTC` daily run, catch-up poll,
 or manual `/api/ingest` / CLI ingest) triggers ATS catalog sync in parallel.
 This means catalog refresh still runs even when the manifest/job ingest cycle
 is skipped due to unchanged upstream `updated_at`.
+
+---
+
+## Admin Panel
+
+Available to users with `role = 'admin'` only. See the setup step above for how to promote a user.
+
+### Pages (HTML, served by the dashboard)
+
+| Route | Purpose |
+|---|---|
+| `/admin` | Live health overview — DB size, reclaimable bytes, total jobs, active scrape runs, ingestion status, maintenance state. Streams via SSE; falls back to polling. |
+| `/admin/sessions` | Every active session across all users. One-click terminate. |
+| `/admin/auth-log` | Recent failed-login events. Scoped or broad rate-limit clear. |
+| `/admin/rate-limits` | Edit per-(IP, email), per-email, per-IP attempt thresholds + window/lockout seconds. View and unlock currently locked-out buckets. |
+| `/admin/maintenance` | Toggle site-wide maintenance mode and set the message non-admins see. |
+| `/admin/backups` | Atomic SQLite backups for both DBs; token-gated download; safety-snapshotted restore. |
+| `/admin/audit` | Every admin action with admin, action, target, IP, user-agent, and detail. |
+
+### JSON API (under `/api/admin/`)
+
+Mirrors each page. All endpoints require an admin session cookie and a valid CSRF token for state-changing requests:
+
+```
+GET    /api/admin/health                                   # one-shot snapshot
+GET    /api/admin/stream/health                            # SSE stream (5-min bounded)
+POST   /api/admin/vacuum                                   # SQLite VACUUM
+POST   /api/admin/ingest                                   # trigger ingestion
+
+GET    /api/admin/sessions
+POST   /api/admin/sessions/{public_id}/terminate
+
+GET    /api/admin/failed-logins
+POST   /api/admin/failed-logins/clear                      # body: email?, ip_address?
+
+GET    /api/admin/rate-limits
+POST   /api/admin/rate-limits/policy                       # body: pair_max, email_max, ip_max, window_seconds, lockout_seconds
+POST   /api/admin/rate-limits/unlock                       # body: bucket_key
+
+GET    /api/admin/maintenance
+POST   /api/admin/maintenance/enable                       # body: message
+POST   /api/admin/maintenance/disable
+
+GET    /api/admin/backups
+POST   /api/admin/backups                                  # body: source=dashboard|identity
+POST   /api/admin/backups/{source}/{filename}/delete
+POST   /api/admin/backups/{source}/{filename}/download     # body: token  (returns the .db file)
+POST   /api/admin/backups/{source}/{filename}/restore      # body: token, confirm=<filename>
+
+GET    /api/admin/audit                                    # query: action, target, limit
+```
+
+The identity-service exposes a parallel admin surface for primitives it owns (sessions, failed logins, rate-limit policy, users + role changes):
+
+```
+GET    /api/admin/sessions
+POST   /api/admin/sessions/{public_id}/terminate
+GET    /api/admin/failed-logins
+POST   /api/admin/failed-logins/clear
+GET    /api/admin/rate-limits
+POST   /api/admin/rate-limits/policy
+POST   /api/admin/rate-limits/unlock
+GET    /api/admin/users
+POST   /api/admin/users/{user_id}/role                     # body: role=user|admin
+```
+
+### Safety properties worth knowing
+
+- **Audit log is best-effort, never blocking.** A DB outage on the audit insert logs an error and lets the action complete — losing one audit row is preferable to refusing a vacuum or a maintenance toggle.
+- **Backups are atomic.** Created via SQLite's online `.backup()` API, so live writers cannot corrupt the snapshot.
+- **Restore has four gates:** admin session + valid `APPLYD_BACKUP_TOKEN` + maintenance mode ON + you must re-type the exact filename in the confirm field. The pre-restore live DB is itself snapshotted before the swap, so the prior state is recoverable through the same restore flow.
+- **Maintenance middleware** sits inside the auth middleware so it can read `request.state.user_role`. Admins bypass; everyone else gets a 503 with the configured message. Static assets, `/api/health`, and the admin panel itself are always exempt so you can flip the flag back off.
+- **SSE stream lifetime is bounded** (default 5 minutes). The browser auto-reconnects, and re-auth happens on reconnect — no stale-session footgun.
 
 ---
 
@@ -354,9 +469,9 @@ Use this workflow when publishing a new version (including `v1.0.0`):
 5. In GitHub, create a Release from that tag and paste/fill notes from the template.
 
 For this repository, release notes should always call out:
-- Dashboard behavior changes (`/`, `/saved`, `/scrape`, `/stats`, `/settings`)
+- Dashboard behavior changes (`/`, `/saved`, `/scrape`, `/stats`, `/settings`, `/admin/*`)
 - Data freshness/retention changes
-- Any schema/env var/upgrade steps
+- Any schema/env var/upgrade steps (e.g. `APPLYD_BACKUP_TOKEN`, new admin role requirements)
 
 ---
 

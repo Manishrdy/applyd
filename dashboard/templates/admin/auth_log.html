@@ -1,0 +1,115 @@
+{% extends "admin/_layout.html" %}
+{% set admin_page_title = "Admin · Failed logins" %}
+
+{% block admin_body %}
+<div x-data="adminAuthLog()" x-init="init()" class="space-y-4">
+
+  <header class="flex items-baseline justify-between">
+    <h1 class="text-xl font-semibold tracking-tight">Failed logins</h1>
+    <button type="button" class="btn btn-secondary btn-sm" @click="reload()" :disabled="loading">
+      <span x-show="!loading">Refresh</span>
+      <span x-show="loading">Refreshing…</span>
+    </button>
+  </header>
+
+  <div x-show="error" x-cloak
+       class="card border-danger/40 bg-danger/10 text-danger px-4 py-3 text-sm" x-text="error"></div>
+
+  <section class="card p-4 space-y-3">
+    <h2 class="text-sm font-medium">Clear rate-limit lockouts</h2>
+    <p class="text-xs text-text-subtle">
+      Scoped clear deletes only the matching buckets. Broad clear (both fields blank)
+      preserves bucket history and only nulls <code>locked_until</code>.
+    </p>
+    <div class="grid gap-3 sm:grid-cols-3 items-end">
+      <div class="space-y-1.5">
+        <label class="text-sm font-medium">Email (optional)</label>
+        <input class="input" x-model="clearEmail" placeholder="someone@example.com">
+      </div>
+      <div class="space-y-1.5">
+        <label class="text-sm font-medium">IP address (optional)</label>
+        <input class="input" x-model="clearIp" placeholder="203.0.113.4">
+      </div>
+      <button class="btn btn-primary" @click="doClear()" :disabled="busy">
+        <span x-show="!busy">Clear</span>
+        <span x-show="busy">Clearing…</span>
+      </button>
+    </div>
+  </section>
+
+  <div class="card overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-text-subtle">
+        <tr class="border-b border-border-base">
+          <th class="text-left font-medium px-3 py-2">When</th>
+          <th class="text-left font-medium px-3 py-2">Event</th>
+          <th class="text-left font-medium px-3 py-2">Email</th>
+          <th class="text-left font-medium px-3 py-2">IP</th>
+          <th class="text-left font-medium px-3 py-2 hidden md:table-cell">Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="e in events" :key="e.id">
+          <tr class="border-b border-border-base/60">
+            <td class="px-3 py-2 tabular text-text-subtle" x-text="e.created_at"></td>
+            <td class="px-3 py-2"><span class="badge" x-text="e.event_type"></span></td>
+            <td class="px-3 py-2" x-text="e.email || '—'"></td>
+            <td class="px-3 py-2 tabular" x-text="e.ip_address || '—'"></td>
+            <td class="px-3 py-2 hidden md:table-cell text-text-subtle truncate max-w-[20rem]" x-text="e.detail || ''"></td>
+          </tr>
+        </template>
+        <tr x-show="!events.length && !loading">
+          <td colspan="5" class="px-3 py-6 text-center text-text-subtle">No failed events recorded.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block admin_scripts %}
+<script>
+  function adminAuthLog() {
+    return {
+      loading: false,
+      busy: false,
+      error: "",
+      events: [],
+      clearEmail: "",
+      clearIp: "",
+      async init() { await this.reload(); },
+      async reload() {
+        this.loading = true;
+        this.error = "";
+        try {
+          this.events = await window.adminApi.get("/api/admin/failed-logins?limit=200");
+        } catch (e) {
+          this.error = e.message || "Failed to load events";
+        } finally {
+          this.loading = false;
+        }
+      },
+      async doClear() {
+        const scoped = this.clearEmail || this.clearIp;
+        const label = scoped ? "scoped clear" : "broad clear (unlock everyone)";
+        if (!confirm("Confirm " + label + "?")) return;
+        this.busy = true;
+        try {
+          const res = await window.adminApi.post("/api/admin/failed-logins/clear", {
+            email: this.clearEmail || null,
+            ip_address: this.clearIp || null,
+          });
+          window.adminToast("Cleared " + (res?.cleared ?? 0) + " bucket(s)", "success");
+          this.clearEmail = "";
+          this.clearIp = "";
+          await this.reload();
+        } catch (e) {
+          window.adminToast(e.message || "Clear failed", "error");
+        } finally {
+          this.busy = false;
+        }
+      },
+    };
+  }
+</script>
+{% endblock %}

@@ -51,6 +51,16 @@ CREATE TABLE IF NOT EXISTS auth_events (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_auth_events_created_at ON auth_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_auth_events_success    ON auth_events(success, created_at);
+
+-- Runtime-editable rate-limit policy. Falls back to settings.* when empty.
+-- One row, key='current'. Admin UI rewrites the JSON blob.
+CREATE TABLE IF NOT EXISTS auth_policy (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_by  TEXT
+);
 """
 
 

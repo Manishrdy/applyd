@@ -234,6 +234,23 @@ CREATE TABLE IF NOT EXISTS app_maintenance (
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Admin audit log. Every state-changing admin action records here.
+-- admin_user_id is a loose FK to identity-service users.id (no enforcement;
+-- the two DBs live in separate SQLite files).
+CREATE TABLE IF NOT EXISTS admin_audit (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    admin_user_id  INTEGER NOT NULL,
+    admin_email    TEXT NOT NULL,
+    action         TEXT NOT NULL,
+    target         TEXT,
+    detail         TEXT,
+    ip_address     TEXT,
+    user_agent     TEXT,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_action  ON admin_audit(action, created_at DESC);
+
 """
 
 

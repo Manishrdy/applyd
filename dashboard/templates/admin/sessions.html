@@ -1,0 +1,91 @@
+{% extends "admin/_layout.html" %}
+{% set admin_page_title = "Admin · Sessions" %}
+
+{% block admin_body %}
+<div x-data="adminSessions()" x-init="init()" class="space-y-4">
+
+  <header class="flex items-baseline justify-between">
+    <h1 class="text-xl font-semibold tracking-tight">Active sessions</h1>
+    <button type="button" class="btn btn-secondary btn-sm" @click="reload()" :disabled="loading">
+      <span x-show="!loading">Refresh</span>
+      <span x-show="loading">Refreshing…</span>
+    </button>
+  </header>
+
+  <div x-show="error" x-cloak
+       class="card border-danger/40 bg-danger/10 text-danger px-4 py-3 text-sm" x-text="error"></div>
+
+  <div class="card overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-text-subtle">
+        <tr class="border-b border-border-base">
+          <th class="text-left font-medium px-3 py-2">Email</th>
+          <th class="text-left font-medium px-3 py-2">IP</th>
+          <th class="text-left font-medium px-3 py-2 hidden md:table-cell">User-Agent</th>
+          <th class="text-left font-medium px-3 py-2">Last seen</th>
+          <th class="text-left font-medium px-3 py-2">Expires</th>
+          <th class="text-right font-medium px-3 py-2"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="s in sessions" :key="s.public_id">
+          <tr class="border-b border-border-base/60">
+            <td class="px-3 py-2" x-text="s.email || '(deleted user)'"></td>
+            <td class="px-3 py-2 tabular" x-text="s.ip_address || '—'"></td>
+            <td class="px-3 py-2 hidden md:table-cell text-text-subtle truncate max-w-[18rem]" x-text="s.user_agent || '—'"></td>
+            <td class="px-3 py-2 tabular text-text-subtle" x-text="s.last_seen_at || s.created_at"></td>
+            <td class="px-3 py-2 tabular text-text-subtle" x-text="s.expires_at"></td>
+            <td class="px-3 py-2 text-right">
+              <button class="btn btn-ghost btn-sm" @click="terminate(s)" :disabled="busyId === s.public_id">
+                <span x-show="busyId !== s.public_id">Terminate</span>
+                <span x-show="busyId === s.public_id">…</span>
+              </button>
+            </td>
+          </tr>
+        </template>
+        <tr x-show="!sessions.length && !loading">
+          <td colspan="6" class="px-3 py-6 text-center text-text-subtle">No active sessions.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block admin_scripts %}
+<script>
+  function adminSessions() {
+    return {
+      loading: false,
+      busyId: null,
+      error: "",
+      sessions: [],
+      async init() { await this.reload(); },
+      async reload() {
+        this.loading = true;
+        this.error = "";
+        try {
+          this.sessions = await window.adminApi.get("/api/admin/sessions");
+        } catch (e) {
+          this.error = e.message || "Failed to load sessions";
+        } finally {
+          this.loading = false;
+        }
+      },
+      async terminate(s) {
+        if (!confirm("Terminate session for " + (s.email || s.public_id) + "?")) return;
+        this.busyId = s.public_id;
+        try {
+          await window.adminApi.post("/api/admin/sessions/" + encodeURIComponent(s.public_id) + "/terminate");
+          window.adminToast("Session terminated", "success");
+          await this.reload();
+        } catch (e) {
+          window.adminToast(e.message || "Terminate failed", "error");
+        } finally {
+          this.busyId = null;
+        }
+      },
+    };
+  }
+</script>
+{% endblock %}

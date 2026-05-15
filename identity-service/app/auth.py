@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import logging
 import secrets
 import string
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from argon2 import PasswordHasher
@@ -296,6 +298,77 @@ def validate_session(token: str | None) -> int | None:
     return None
 
 
+# ---- Rate-limit policy (runtime-editable, falls back to settings) ---------
+
+
+@dataclass(frozen=True)
+class RateLimitPolicy:
+    pair_max: int
+    email_max: int
+    ip_max: int
+    window_seconds: int
+    lockout_seconds: int
+
+
+_POLICY_KEY = "rate_limit"
+
+
+def _default_policy() -> RateLimitPolicy:
+    return RateLimitPolicy(
+        pair_max=settings.auth_rate_limit_max_attempts,
+        email_max=settings.auth_rate_limit_email_max_attempts,
+        ip_max=settings.auth_rate_limit_ip_max_attempts,
+        window_seconds=settings.auth_rate_limit_window_seconds,
+        lockout_seconds=settings.auth_rate_limit_lockout_seconds,
+    )
+
+
+def get_rate_limit_policy() -> RateLimitPolicy:
+    """Read the current policy from auth_policy, falling back to settings."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT value FROM auth_policy WHERE key = ?",
+            (_POLICY_KEY,),
+        ).fetchone()
+    if row is None or not row["value"]:
+        return _default_policy()
+    try:
+        payload = json.loads(row["value"])
+        if not isinstance(payload, dict):
+            return _default_policy()
+    except (TypeError, ValueError):
+        return _default_policy()
+    base = _default_policy()
+    return RateLimitPolicy(
+        pair_max=int(payload.get("pair_max", base.pair_max)),
+        email_max=int(payload.get("email_max", base.email_max)),
+        ip_max=int(payload.get("ip_max", base.ip_max)),
+        window_seconds=int(payload.get("window_seconds", base.window_seconds)),
+        lockout_seconds=int(payload.get("lockout_seconds", base.lockout_seconds)),
+    )
+
+
+def set_rate_limit_policy(policy: RateLimitPolicy, *, updated_by: str | None = None) -> None:
+    payload = json.dumps(
+        {
+            "pair_max": policy.pair_max,
+            "email_max": policy.email_max,
+            "ip_max": policy.ip_max,
+            "window_seconds": policy.window_seconds,
+            "lockout_seconds": policy.lockout_seconds,
+        },
+        separators=(",", ":"),
+    )
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO auth_policy(key, value, updated_at, updated_by) "
+            "VALUES(?, ?, datetime('now'), ?) "
+            "ON CONFLICT(key) DO UPDATE SET "
+            "value = excluded.value, updated_at = datetime('now'), updated_by = excluded.updated_by",
+            (_POLICY_KEY, payload, updated_by),
+        )
+
+
 # ---- Rate limiting ---------------------------------------------------------
 
 
@@ -335,10 +408,11 @@ def is_signin_rate_limited(ip_address: str, email: str) -> bool:
     return False
 
 
-def _increment_bucket(bucket_key: str, max_attempts: int) -> None:
+def _increment_bucket(bucket_key: str, max_attempts: int, *, policy: RateLimitPolicy | None = None) -> None:
     """Increment a single rate-limit bucket and trip the lockout if needed."""
+    pol = policy or get_rate_limit_policy()
     now = _utcnow()
-    window_start = now - timedelta(seconds=settings.auth_rate_limit_window_seconds)
+    window_start = now - timedelta(seconds=pol.window_seconds)
     with get_db() as conn:
         row = conn.execute(
             "SELECT failed_attempts, window_started_at FROM auth_rate_limits WHERE bucket_key = ?",
@@ -365,9 +439,7 @@ def _increment_bucket(bucket_key: str, max_attempts: int) -> None:
             attempts += 1
         locked_until: str | None = None
         if attempts >= max_attempts:
-            locked_until = (
-                now + timedelta(seconds=settings.auth_rate_limit_lockout_seconds)
-            ).isoformat()
+            locked_until = (now + timedelta(seconds=pol.lockout_seconds)).isoformat()
         conn.execute(
             "UPDATE auth_rate_limits SET failed_attempts = ?, window_started_at = ?, locked_until = ? "
             "WHERE bucket_key = ?",
@@ -378,14 +450,15 @@ def _increment_bucket(bucket_key: str, max_attempts: int) -> None:
 def record_signin_failure(ip_address: str, email: str) -> None:
     """Increment all three buckets: (IP, email), email-wide, IP-wide.
 
-    Per-(IP, email) trips fast (default 5) — catches a focused attacker.
-    Per-email trips at a higher threshold (catches distributed credential
-    stuffing without locking the real owner out from a clean IP for a
-    single misclick). Per-IP catches an attacker rotating emails.
+    Per-(IP, email) trips fast — catches a focused attacker. Per-email
+    trips at a higher threshold (catches distributed credential stuffing
+    without locking the real owner out from a clean IP for a single
+    misclick). Per-IP catches an attacker rotating emails.
     """
-    _increment_bucket(_rate_limit_bucket_key(ip_address, email), settings.auth_rate_limit_max_attempts)
-    _increment_bucket(_rate_limit_email_key(email), settings.auth_rate_limit_email_max_attempts)
-    _increment_bucket(_rate_limit_ip_key(ip_address), settings.auth_rate_limit_ip_max_attempts)
+    policy = get_rate_limit_policy()
+    _increment_bucket(_rate_limit_bucket_key(ip_address, email), policy.pair_max, policy=policy)
+    _increment_bucket(_rate_limit_email_key(email), policy.email_max, policy=policy)
+    _increment_bucket(_rate_limit_ip_key(ip_address), policy.ip_max, policy=policy)
 
 
 def clear_signin_failures(ip_address: str, email: str) -> None:
@@ -481,3 +554,132 @@ def clear_all_sessions(user_id: int, keep_token: str | None = None) -> int:
                 (user_id,),
             )
     return int(cur.rowcount or 0)
+
+
+# ---- Admin queries / mutations --------------------------------------------
+
+
+def admin_list_sessions(limit: int = 200) -> list[dict]:
+    """Every active session across all users, newest-touched first."""
+    limit = max(1, min(int(limit), 1000))
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT s.public_id, s.user_id, u.email, "
+            "s.created_at, s.expires_at, s.last_seen_at, s.ip_address, s.user_agent "
+            "FROM auth_sessions s "
+            "LEFT JOIN users u ON u.id = s.user_id "
+            "WHERE s.expires_at > datetime('now') "
+            "ORDER BY COALESCE(s.last_seen_at, s.created_at) DESC "
+            "LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def admin_terminate_session(public_id: str) -> bool:
+    """Kill a single session by its public id. Returns True if removed."""
+    with get_db() as conn:
+        cur = conn.execute(
+            "DELETE FROM auth_sessions WHERE public_id = ?",
+            (public_id,),
+        )
+    return int(cur.rowcount or 0) > 0
+
+
+def admin_list_failed_logins(limit: int = 100) -> list[dict]:
+    """Recent failed sign-in attempts. Joins auth_events for richer detail."""
+    limit = max(1, min(int(limit), 500))
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, event_type, email, user_id, ip_address, user_agent, detail, created_at "
+            "FROM auth_events "
+            "WHERE success = 0 "
+            "ORDER BY id DESC "
+            "LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def admin_clear_failed_logins(*, email: str | None = None, ip_address: str | None = None) -> int:
+    """Clear matching rate-limit buckets. Returns rows deleted.
+
+    Scoped to either email, ip, or — if both None — all signin/signup buckets.
+    Conservative: we never clear unrelated buckets accidentally.
+    """
+    patterns: list[str] = []
+    if email:
+        normalized = email.strip().lower()
+        patterns.append(f"pair::%::{normalized}")
+        patterns.append(f"email::{normalized}")
+    if ip_address:
+        normalized_ip = ip_address.strip().lower()
+        patterns.append(f"pair::{normalized_ip}::%")
+        patterns.append(f"ip::{normalized_ip}")
+        patterns.append(f"signup_ip::{normalized_ip}")
+    deleted = 0
+    with get_db() as conn:
+        if not patterns:
+            # Caller asked for a broad clear — only clear lockouts, not the
+            # full bucket history, so legitimate counters survive.
+            cur = conn.execute(
+                "UPDATE auth_rate_limits SET locked_until = NULL "
+                "WHERE locked_until IS NOT NULL"
+            )
+            deleted = int(cur.rowcount or 0)
+        else:
+            for pat in patterns:
+                cur = conn.execute(
+                    "DELETE FROM auth_rate_limits WHERE bucket_key LIKE ?",
+                    (pat,),
+                )
+                deleted += int(cur.rowcount or 0)
+    return deleted
+
+
+def admin_list_locked_buckets() -> list[dict]:
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT bucket_key, failed_attempts, window_started_at, locked_until "
+            "FROM auth_rate_limits "
+            "WHERE locked_until IS NOT NULL "
+            "ORDER BY locked_until DESC "
+            "LIMIT 200"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def admin_unlock_bucket(bucket_key: str) -> bool:
+    with get_db() as conn:
+        cur = conn.execute(
+            "UPDATE auth_rate_limits SET locked_until = NULL, failed_attempts = 0 "
+            "WHERE bucket_key = ?",
+            (bucket_key,),
+        )
+    return int(cur.rowcount or 0) > 0
+
+
+def admin_set_user_role(user_id: int, role: str) -> bool:
+    if role not in VALID_ROLES:
+        raise ValueError(f"invalid role: {role!r}")
+    with get_db() as conn:
+        cur = conn.execute(
+            "UPDATE users SET role = ? WHERE id = ?",
+            (role, user_id),
+        )
+    return int(cur.rowcount or 0) > 0
+
+
+def admin_list_users(limit: int = 200) -> list[dict]:
+    limit = max(1, min(int(limit), 1000))
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT u.id, u.email, u.name, u.role, u.created_at, "
+            "(SELECT COUNT(*) FROM auth_sessions s WHERE s.user_id = u.id AND s.expires_at > datetime('now')) AS active_sessions, "
+            "(SELECT MAX(created_at) FROM auth_events e WHERE e.user_id = u.id AND e.event_type = 'signin' AND e.success = 1) AS last_signin "
+            "FROM users u "
+            "ORDER BY u.id DESC "
+            "LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]

@@ -1,0 +1,194 @@
+{% extends "admin/_layout.html" %}
+{% set admin_page_title = "Admin · Overview" %}
+
+{% block admin_body %}
+<div x-data="adminHome()" x-init="init()" class="space-y-6">
+
+  <header class="flex items-baseline justify-between">
+    <h1 class="text-xl font-semibold tracking-tight">Overview</h1>
+    <div class="flex items-center gap-3">
+      <span class="text-xs" :class="streamState === 'live' ? 'text-success' : 'text-text-subtle'">
+        <span x-show="streamState === 'live'">● live</span>
+        <span x-show="streamState === 'connecting'">connecting…</span>
+        <span x-show="streamState === 'fallback'">polling</span>
+        <span x-show="streamState === 'error'">offline</span>
+      </span>
+      <button type="button" class="btn btn-secondary btn-sm" @click="reload()" :disabled="loading">
+        <span x-show="!loading">Refresh</span>
+        <span x-show="loading">Refreshing…</span>
+      </button>
+    </div>
+  </header>
+
+  {# ---- Error toast (inline) ----------------------------------- #}
+  <div x-show="error" x-cloak
+       class="card border-danger/40 bg-danger/10 text-danger px-4 py-3 text-sm">
+    <span x-text="error"></span>
+  </div>
+
+  {# ---- Metric grid ------------------------------------------- #}
+  <section class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <template x-for="card in metricCards()" :key="card.label">
+      <div class="card p-4">
+        <p class="text-xs uppercase tracking-wider text-text-subtle" x-text="card.label"></p>
+        <p class="mt-1 text-2xl font-semibold tabular" x-text="card.value"></p>
+        <p class="text-xs text-text-subtle" x-text="card.hint"></p>
+      </div>
+    </template>
+  </section>
+
+  {# ---- Side-by-side: ingestion + maintenance ----------------- #}
+  <section class="grid gap-4 lg:grid-cols-2">
+    <div class="card p-4">
+      <h2 class="text-sm font-medium text-text">Ingestion</h2>
+      <dl class="mt-2 space-y-1 text-sm">
+        <div class="flex justify-between gap-3">
+          <dt class="text-text-subtle">Last success</dt>
+          <dd class="text-text tabular" x-text="data?.ingestion?.last_success?.fetched_at || '—'"></dd>
+        </div>
+        <div class="flex justify-between gap-3">
+          <dt class="text-text-subtle">Manifest version</dt>
+          <dd class="text-text tabular" x-text="data?.ingestion?.last_success?.manifest_updated_at || '—'"></dd>
+        </div>
+        <div class="flex justify-between gap-3">
+          <dt class="text-text-subtle">Rolling window</dt>
+          <dd class="text-text" x-text="(data?.ingestion?.rolling_window_days ?? '?') + ' days'"></dd>
+        </div>
+        <div class="flex justify-between gap-3">
+          <dt class="text-text-subtle">Cron hour (UTC)</dt>
+          <dd class="text-text tabular" x-text="data?.ingestion?.cron_hour_utc ?? '—'"></dd>
+        </div>
+      </dl>
+      <div class="mt-3 flex gap-2">
+        <button class="btn btn-secondary btn-sm" @click="runIngest(false)" :disabled="busy">Ingest now</button>
+        <button class="btn btn-ghost btn-sm" @click="runIngest(true)" :disabled="busy">Force re-ingest</button>
+      </div>
+    </div>
+
+    <div class="card p-4">
+      <h2 class="text-sm font-medium text-text">Maintenance</h2>
+      <dl class="mt-2 space-y-1 text-sm">
+        <div class="flex justify-between gap-3">
+          <dt class="text-text-subtle">Status</dt>
+          <dd>
+            <span class="pill" :class="data?.maintenance?.enabled ? 'border-warning/40 bg-warning/10 text-warning' : ''">
+              <span class="pill-dot" :style="data?.maintenance?.enabled ? 'background:hsl(var(--warning))' : 'background:hsl(var(--success))'"></span>
+              <span x-text="data?.maintenance?.enabled ? 'On' : 'Off'"></span>
+            </span>
+          </dd>
+        </div>
+        <div class="flex justify-between gap-3">
+          <dt class="text-text-subtle">Message</dt>
+          <dd class="text-text" x-text="data?.maintenance?.message || '—'"></dd>
+        </div>
+        <div class="flex justify-between gap-3">
+          <dt class="text-text-subtle">Last toggled</dt>
+          <dd class="text-text tabular" x-text="data?.maintenance?.updated_at || '—'"></dd>
+        </div>
+      </dl>
+      <div class="mt-3">
+        <a class="btn btn-secondary btn-sm" href="/admin/maintenance">Manage</a>
+      </div>
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block admin_scripts %}
+<script>
+  function adminHome() {
+    return {
+      loading: false,
+      busy: false,
+      error: "",
+      data: null,
+      streamState: "connecting",     // connecting | live | fallback | error
+      _source: null,                 // active EventSource
+      _pollTimer: null,              // fallback setInterval handle
+      async init() {
+        // Render whatever we can ASAP, then promote to a live stream.
+        await this.reload();
+        this._connectStream();
+        window.addEventListener("beforeunload", () => this._teardown());
+      },
+      async reload() {
+        this.loading = true;
+        this.error = "";
+        try {
+          this.data = await window.adminApi.get("/api/admin/health");
+        } catch (e) {
+          this.error = e.message || "Failed to load health snapshot";
+        } finally {
+          this.loading = false;
+        }
+      },
+      _connectStream() {
+        // If the browser doesn't support EventSource, stay on polling.
+        if (typeof EventSource === "undefined") {
+          this._startFallbackPolling();
+          return;
+        }
+        try {
+          this._source = new EventSource("/api/admin/stream/health", { withCredentials: true });
+        } catch (_) {
+          this._startFallbackPolling();
+          return;
+        }
+        this._source.addEventListener("hello", () => { this.streamState = "live"; });
+        this._source.onmessage = (ev) => {
+          try { this.data = JSON.parse(ev.data); } catch (_) { /* ignore bad frame */ }
+        };
+        this._source.addEventListener("timeout", () => {
+          // Server bounded the lifetime — reconnect cleanly.
+          this._teardown();
+          this._connectStream();
+        });
+        this._source.onerror = () => {
+          // Don't thrash. Close, fall back to polling, retry the stream after a beat.
+          this._teardown();
+          this._startFallbackPolling();
+          setTimeout(() => {
+            if (this.streamState !== "live") this._connectStream();
+          }, 10000);
+        };
+      },
+      _startFallbackPolling() {
+        if (this._pollTimer) return;
+        this.streamState = "fallback";
+        this._pollTimer = setInterval(() => { this.reload(); }, 15000);
+      },
+      _teardown() {
+        if (this._source) { try { this._source.close(); } catch (_) {} this._source = null; }
+        if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = null; }
+      },
+      metricCards() {
+        const d = this.data || {};
+        const db = d.db || {};
+        const cache = d.cache || {};
+        const scrape = d.scrape || {};
+        const mb = (n) => (n ? (n / (1024 * 1024)).toFixed(1) + " MB" : "0 MB");
+        return [
+          { label: "DB size",       value: mb(db.size_bytes),       hint: "applyd.db on disk" },
+          { label: "Reclaimable",   value: mb(db.reclaimable_bytes), hint: "VACUUM would return" },
+          { label: "Jobs total",    value: (db.jobs_total ?? "—").toLocaleString(), hint: "cached counter" },
+          { label: "Scrape active", value: scrape.active_runs ?? "—", hint: "queued or running" },
+        ];
+      },
+      async runIngest(force) {
+        if (this.busy) return;
+        this.busy = true;
+        try {
+          const r = await window.adminApi.post("/api/admin/ingest", { force: force ? "true" : "false" });
+          window.adminToast("Ingest: " + (r?.status || "ok"), "success");
+          await this.reload();
+        } catch (e) {
+          window.adminToast(e.message || "Ingest failed", "error");
+        } finally {
+          this.busy = false;
+        }
+      },
+    };
+  }
+</script>
+{% endblock %}
