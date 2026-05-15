@@ -82,6 +82,10 @@ function dashboard() {
     page: 1,
     limit: 50,
 
+    // Result-grid layout. Persisted to localStorage so the choice
+    // survives reloads. Use setView() to mutate.
+    view: "grid",
+
     jobs: [],
     total: 0,
     hasMore: false,
@@ -103,9 +107,20 @@ function dashboard() {
     /* ---- lifecycle --------------------------------------- */
     async init() {
       this.loadFromUrl();
+      // Restore the user's previous grid/list choice (ignore bad values).
+      try {
+        const v = localStorage.getItem("applyd:view");
+        if (v === "grid" || v === "list") this.view = v;
+      } catch (e) { /* localStorage blocked — fine, stay default */ }
       // Load both in parallel — facets sidebar shouldn't block the result grid.
       await Promise.all([this.fetchJobs(true), this.fetchFacets()]);
       this.observeScrollSentinel();
+    },
+
+    setView(value) {
+      if (value !== "grid" && value !== "list") return;
+      this.view = value;
+      try { localStorage.setItem("applyd:view", value); } catch (e) {}
     },
 
     /* ---- fetchers ---------------------------------------- */
@@ -364,14 +379,33 @@ function dashboard() {
       return this.sort;
     },
 
-    /* ---- infinite scroll --------------------------------- */
+    /* ---- infinite scroll ---------------------------------
+       IntersectionObserver only fires on intersection *transitions*. Two
+       failure modes that bite an x-for grid without a fallback check:
+         1. Initial setup races Alpine's first render — observer may attach
+            before/after the cards land, and the initial callback can fire
+            "not intersecting" with no future scroll crossing it back in
+            (until the user scrolls up past the sentinel and back down).
+         2. A new batch is appended but doesn't push the sentinel past the
+            rootMargin (tall viewport, few cards) — observer latches in
+            "intersecting" and never fires again.
+       Re-evaluating manually after every jobs change closes both gaps. */
     observeScrollSentinel() {
       const sentinel = this.$refs.sentinel;
       if (!sentinel) return;
+
+      const maybeLoad = () => {
+        if (this.isLoading || this.isLoadingMore || !this.hasMore) return;
+        const rect = sentinel.getBoundingClientRect();
+        if (rect.top < window.innerHeight + 600) this.loadMore();
+      };
+
       const obs = new IntersectionObserver(entries => {
-        if (entries[0].isIntersecting) this.loadMore();
+        if (entries[0].isIntersecting) maybeLoad();
       }, { rootMargin: "600px" });
       obs.observe(sentinel);
+
+      this.$watch("jobs", () => requestAnimationFrame(maybeLoad));
     },
 
     /* ---- formatters used in template --------------------- */

@@ -1,209 +1,244 @@
 {# ============================================================
    Filter sidebar — included twice (sticky desktop + mobile drawer).
    Assumes Alpine `dashboard()` scope is active on an ancestor.
+
+   Visual:
+     · Sticky internal header with active-filter count + clear all
+     · Each section: legend row w/ active-count pill, optional show-all
+     · Chip-style toggles for Role and Seniority (denser, more scannable)
+     · Salary block with preset chips + helper text
 ================================================================= #}
 
-<div class="space-y-6">
+<div class="filter-shell space-y-1">
 
-  {# ===== Posted within (radio) ===== #}
-  <fieldset class="space-y-2">
-    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Posted within</legend>
-    <div class="space-y-1">
+  {# ---- Sticky section header ----------------------------------- #}
+  <div class="filter-header">
+    <div class="flex items-center justify-between gap-2">
+      <p class="text-xs font-semibold uppercase tracking-wider text-text-subtle">
+        Filters
+        <span x-show="activeChips().length"
+              class="ml-1.5 inline-flex items-center justify-center px-1.5 h-4 min-w-4 rounded-full
+                     bg-accent text-accent-fg text-[10px] font-bold tabular leading-none align-middle"
+              x-text="activeChips().length"></span>
+      </p>
+      <button type="button"
+              class="text-xs text-text-subtle hover:text-accent transition-colors disabled:opacity-40 disabled:hover:text-text-subtle"
+              @click="clearAll()"
+              :disabled="activeChips().length === 0">
+        Clear all
+      </button>
+    </div>
+  </div>
+
+  {# ===== Posted within (segmented control) ===================== #}
+  <section class="filter-section">
+    <header class="filter-legend">
+      <span>Posted within</span>
+    </header>
+    <div class="grid grid-cols-2 gap-1">
       <template x-for="opt in POSTED_OPTIONS" :key="opt.value">
-        <label class="flex items-center gap-2 px-1 py-1 cursor-pointer rounded-sm hover:bg-surface-muted">
-          <input type="radio"
-                 name="posted_hours"
-                 :value="opt.value"
-                 :checked="filters.posted_hours === opt.value"
-                 @change="filters.posted_hours = opt.value; onFilterChange()"
-                 class="accent-accent">
-          <span class="text-sm" x-text="opt.label"></span>
-        </label>
+        <button type="button"
+                class="filter-pick"
+                :class="filters.posted_hours === opt.value ? 'is-active' : ''"
+                @click="filters.posted_hours = opt.value; onFilterChange()"
+                :aria-pressed="filters.posted_hours === opt.value">
+          <span x-text="opt.label.replace('Last ', '')"></span>
+        </button>
       </template>
     </div>
-  </fieldset>
+  </section>
 
-  {# ===== Country (facet multi) ===== #}
-  <fieldset class="space-y-2">
-    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Country</legend>
-    <div class="space-y-1 max-h-48 overflow-y-auto">
+  {# ===== Work mode (3-way segmented) =========================== #}
+  <section class="filter-section">
+    <header class="filter-legend">
+      <span>Work mode</span>
+      <span class="filter-active" x-show="filters.remote !== null">1</span>
+    </header>
+    <div class="filter-segmented">
+      <button type="button"
+              :class="filters.remote === null ? 'is-active' : ''"
+              @click="setRemote('any')">Any</button>
+      <button type="button"
+              :class="filters.remote === true ? 'is-active' : ''"
+              @click="setRemote('remote')">Remote</button>
+      <button type="button"
+              :class="filters.remote === false ? 'is-active' : ''"
+              @click="setRemote('onsite')">On-site</button>
+    </div>
+  </section>
+
+  {# ===== Country (facet, multi) ================================ #}
+  <section class="filter-section">
+    <header class="filter-legend">
+      <span>Country</span>
+      <span class="filter-active" x-show="filters.country.length"
+            x-text="filters.country.length"></span>
+    </header>
+    <div class="filter-list" style="max-height: 12rem;">
       <template x-for="row in countryFacetRows()" :key="row.value || '_'">
-        <label class="flex items-center justify-between gap-2 px-1 py-1 cursor-pointer rounded-sm hover:bg-surface-muted">
-          <span class="flex items-center gap-2 min-w-0">
-            <input type="checkbox"
-                   :checked="row.value && isChecked('country', row.value)"
-                   :disabled="!row.value"
-                   @change="row.value && toggleArrayFilter('country', row.value)"
-                   class="accent-accent">
-            <span class="text-sm truncate" x-text="facetLabel('country', row.value)"></span>
-          </span>
-          <span class="text-xs text-text-subtle tabular shrink-0" x-text="row.count.toLocaleString()"></span>
+        <label class="filter-row" :class="row.value && isChecked('country', row.value) ? 'is-active' : ''">
+          <input type="checkbox"
+                 :checked="row.value && isChecked('country', row.value)"
+                 :disabled="!row.value"
+                 @change="row.value && toggleArrayFilter('country', row.value)">
+          <span class="filter-row-label" x-text="facetLabel('country', row.value)"></span>
+          <span class="filter-count" x-text="row.count.toLocaleString()"></span>
         </label>
       </template>
     </div>
-  </fieldset>
+  </section>
 
-  {# ===== Role (curated software-eng taxonomy, title-only match) ===== #}
-  <fieldset class="space-y-2" x-data="{ expanded: false }">
-    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Role</legend>
-    <div class="space-y-1">
+  {# ===== Role (curated taxonomy, chip toggles) ================= #}
+  <section class="filter-section" x-data="{ expanded: false }">
+    <header class="filter-legend">
+      <span>Role</span>
+      <span class="filter-active" x-show="(filters.roles || []).length"
+            x-text="(filters.roles || []).length"></span>
+    </header>
+    <div class="flex flex-wrap gap-1">
       <template x-for="(opt, i) in ROLE_OPTIONS" :key="opt.value">
-        <label x-show="expanded || i < 7 || isChecked('roles', opt.value)"
-               class="flex items-center gap-2 px-1 py-1 cursor-pointer rounded-sm hover:bg-surface-muted">
-          <input type="checkbox"
-                 :checked="isChecked('roles', opt.value)"
-                 @change="toggleArrayFilter('roles', opt.value)"
-                 class="accent-accent">
-          <span class="text-sm truncate" x-text="opt.label"></span>
-        </label>
+        <button type="button"
+                x-show="expanded || i < 7 || isChecked('roles', opt.value)"
+                class="filter-chip"
+                :class="isChecked('roles', opt.value) ? 'is-active' : ''"
+                :aria-pressed="isChecked('roles', opt.value)"
+                @click="toggleArrayFilter('roles', opt.value)">
+          <span x-text="opt.label"></span>
+        </button>
       </template>
     </div>
     <button type="button"
             x-show="ROLE_OPTIONS.length > 7"
             @click="expanded = !expanded"
-            class="text-xs text-text-muted hover:text-text underline-offset-2 hover:underline">
+            class="filter-more">
       <span x-show="!expanded">Show all (<span x-text="ROLE_OPTIONS.length"></span>)</span>
       <span x-show="expanded">Show fewer</span>
     </button>
-  </fieldset>
+  </section>
 
-  {# ===== Seniority (cross-cut on title) ===== #}
-  <fieldset class="space-y-2">
-    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Seniority</legend>
-    <div class="space-y-1">
+  {# ===== Seniority (chip toggles) ============================== #}
+  <section class="filter-section">
+    <header class="filter-legend">
+      <span>Seniority</span>
+      <span class="filter-active" x-show="(filters.seniority || []).length"
+            x-text="(filters.seniority || []).length"></span>
+    </header>
+    <div class="flex flex-wrap gap-1">
       <template x-for="opt in SENIORITY_OPTIONS" :key="opt.value">
-        <label class="flex items-center gap-2 px-1 py-1 cursor-pointer rounded-sm hover:bg-surface-muted">
-          <input type="checkbox"
-                 :checked="isChecked('seniority', opt.value)"
-                 @change="toggleArrayFilter('seniority', opt.value)"
-                 class="accent-accent">
-          <span class="text-sm" x-text="opt.label"></span>
-        </label>
+        <button type="button"
+                class="filter-chip"
+                :class="isChecked('seniority', opt.value) ? 'is-active' : ''"
+                :aria-pressed="isChecked('seniority', opt.value)"
+                @click="toggleArrayFilter('seniority', opt.value)">
+          <span x-text="opt.label"></span>
+        </button>
       </template>
     </div>
-  </fieldset>
+  </section>
 
-  {# ===== Remote (segmented) ===== #}
-  <fieldset class="space-y-2">
-    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Work mode</legend>
-    <div class="grid grid-cols-3 gap-1 p-1 bg-surface-muted rounded-sm">
-      <button type="button"
-              class="px-2 py-1 text-xs rounded-sm"
-              :class="filters.remote === null ? 'bg-surface text-text shadow-soft-sm' : 'text-text-muted hover:text-text'"
-              @click="setRemote('any')">Any</button>
-      <button type="button"
-              class="px-2 py-1 text-xs rounded-sm"
-              :class="filters.remote === true ? 'bg-surface text-text shadow-soft-sm' : 'text-text-muted hover:text-text'"
-              @click="setRemote('remote')">Remote</button>
-      <button type="button"
-              class="px-2 py-1 text-xs rounded-sm"
-              :class="filters.remote === false ? 'bg-surface text-text shadow-soft-sm' : 'text-text-muted hover:text-text'"
-              @click="setRemote('onsite')">On-site</button>
-    </div>
-  </fieldset>
-
-  {# ===== ATS (facet multi) ===== #}
-  <fieldset class="space-y-2"
-            x-data="{ expanded: false }">
-    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">ATS source</legend>
-    <div class="space-y-1 max-h-72 overflow-y-auto">
+  {# ===== ATS source (facet, multi) ============================= #}
+  <section class="filter-section" x-data="{ expanded: false }">
+    <header class="filter-legend">
+      <span>ATS source</span>
+      <span class="filter-active" x-show="filters.ats.length"
+            x-text="filters.ats.length"></span>
+    </header>
+    <div class="filter-list" :style="expanded ? 'max-height: 22rem;' : ''">
       <template x-for="(row, i) in facets.ats" :key="row.value || '_'">
         <label x-show="expanded || i < 8"
-               class="flex items-center justify-between gap-2 px-1 py-1 cursor-pointer rounded-sm hover:bg-surface-muted">
-          <span class="flex items-center gap-2 min-w-0">
-            <input type="checkbox"
-                   :checked="row.value && isChecked('ats', row.value)"
-                   :disabled="!row.value"
-                   @change="row.value && toggleArrayFilter('ats', row.value)"
-                   class="accent-accent">
-            <span class="text-sm truncate" x-text="facetLabel('ats', row.value)"></span>
-          </span>
-          <span class="text-xs text-text-subtle tabular shrink-0" x-text="row.count.toLocaleString()"></span>
+               class="filter-row"
+               :class="row.value && isChecked('ats', row.value) ? 'is-active' : ''">
+          <input type="checkbox"
+                 :checked="row.value && isChecked('ats', row.value)"
+                 :disabled="!row.value"
+                 @change="row.value && toggleArrayFilter('ats', row.value)">
+          <span class="filter-row-label" x-text="facetLabel('ats', row.value)"></span>
+          <span class="filter-count" x-text="row.count.toLocaleString()"></span>
         </label>
       </template>
     </div>
     <button type="button"
             x-show="facets.ats.length > 8"
             @click="expanded = !expanded"
-            class="text-xs text-text-muted hover:text-text underline-offset-2 hover:underline">
+            class="filter-more">
       <span x-show="!expanded">Show all (<span x-text="facets.ats.length"></span>)</span>
       <span x-show="expanded">Show fewer</span>
     </button>
-  </fieldset>
+  </section>
 
-  {# ===== Employment type (facet multi) ===== #}
-  <fieldset class="space-y-2" x-show="employmentFacetRows().length">
-    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Employment type</legend>
-    <div class="space-y-1 max-h-48 overflow-y-auto">
+  {# ===== Employment type (facet, multi) ======================== #}
+  <section class="filter-section" x-show="employmentFacetRows().length">
+    <header class="filter-legend">
+      <span>Employment type</span>
+      <span class="filter-active" x-show="filters.employment_type.length"
+            x-text="filters.employment_type.length"></span>
+    </header>
+    <div class="filter-list" style="max-height: 12rem;">
       <template x-for="row in employmentFacetRows()" :key="row.value">
-        <label class="flex items-center justify-between gap-2 px-1 py-1 cursor-pointer rounded-sm hover:bg-surface-muted">
-          <span class="flex items-center gap-2 min-w-0">
-            <input type="checkbox"
-                   :checked="isChecked('employment_type', row.value)"
-                   @change="toggleArrayFilter('employment_type', row.value)"
-                   class="accent-accent">
-            <span class="text-sm truncate" x-text="facetLabel('employment_type', row.value)"></span>
-          </span>
-          <span class="text-xs text-text-subtle tabular shrink-0" x-text="row.count.toLocaleString()"></span>
+        <label class="filter-row"
+               :class="isChecked('employment_type', row.value) ? 'is-active' : ''">
+          <input type="checkbox"
+                 :checked="isChecked('employment_type', row.value)"
+                 @change="toggleArrayFilter('employment_type', row.value)">
+          <span class="filter-row-label" x-text="facetLabel('employment_type', row.value)"></span>
+          <span class="filter-count" x-text="row.count.toLocaleString()"></span>
         </label>
       </template>
     </div>
-  </fieldset>
+  </section>
 
-  {# ===== Salary minimum ===== #}
-  <fieldset class="space-y-2">
-    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Min salary (USD/yr)</legend>
-    <div class="flex items-center gap-2">
+  {# ===== Salary minimum ======================================== #}
+  <section class="filter-section">
+    <header class="filter-legend">
+      <span>Min salary <span class="text-text-subtle font-normal normal-case tracking-normal">(USD/yr)</span></span>
+      <span class="filter-active" x-show="filters.salary_min_usd">1</span>
+    </header>
+    <div class="relative">
+      <span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-subtle font-mono text-sm">$</span>
       <input type="number"
              min="0"
              step="10000"
              placeholder="any"
-             class="input text-sm"
+             class="input text-sm pl-6 pr-8 tabular"
              x-model.number.lazy="filters.salary_min_usd"
              @change="onFilterChange()">
       <button type="button"
               x-show="filters.salary_min_usd"
               @click="filters.salary_min_usd = null; onFilterChange()"
-              class="btn btn-ghost btn-icon btn-sm"
+              class="absolute right-1 top-1/2 -translate-y-1/2 grid h-7 w-7 place-items-center rounded-base text-text-subtle hover:text-text hover:bg-surface-muted"
               aria-label="Clear">
         <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
     </div>
-    <div class="flex flex-wrap gap-1">
-      <template x-for="preset in [100000, 150000, 200000, 250000]">
+    <div class="flex flex-wrap gap-1 pt-1">
+      <template x-for="preset in [100000, 150000, 200000, 250000]" :key="preset">
         <button type="button"
                 @click="filters.salary_min_usd = preset; onFilterChange()"
-                class="text-xs px-2 py-0.5 rounded-pill border border-border-base text-text-muted hover:text-text hover:bg-surface-muted">
+                class="filter-chip"
+                :class="filters.salary_min_usd === preset ? 'is-active' : ''">
           $<span x-text="(preset / 1000) + 'k'"></span>+
         </button>
       </template>
     </div>
-    <p class="text-xs text-text-subtle">Annual USD only · non-USD jobs excluded from this filter.</p>
-  </fieldset>
+    <p class="text-xs text-text-subtle pt-0.5">Annual USD only · non-USD jobs excluded.</p>
+  </section>
 
-  {# ===== Show undated toggle ===== #}
-  <fieldset class="space-y-2">
-    <legend class="text-xs font-semibold uppercase tracking-wider text-text-subtle">Date precision</legend>
-    <label class="flex items-start gap-2 cursor-pointer">
+  {# ===== Date precision toggle ================================= #}
+  <section class="filter-section">
+    <header class="filter-legend">
+      <span>Date precision</span>
+    </header>
+    <label class="filter-row" :class="!filters.include_undated ? 'is-active' : ''">
       <input type="checkbox"
              :checked="filters.include_undated"
-             @change="filters.include_undated = !filters.include_undated; onFilterChange()"
-             class="accent-accent mt-0.5">
-      <span class="text-sm">
-        Include undated jobs
-        <span class="block text-xs text-text-subtle">When upstream omits posted date, we use first-seen as the time anchor.</span>
+             @change="filters.include_undated = !filters.include_undated; onFilterChange()">
+      <span class="flex-1 min-w-0">
+        <span class="text-sm">Include undated jobs</span>
+        <span class="block text-xs text-text-subtle leading-snug mt-0.5">
+          When upstream omits posted date, we use first-seen as the anchor.
+        </span>
       </span>
     </label>
-  </fieldset>
-
-  {# ===== Clear all ===== #}
-  <div class="pt-2 border-t border-border-base">
-    <button type="button"
-            class="btn btn-ghost btn-sm w-full justify-center"
-            @click="clearAll()"
-            :disabled="activeChips().length === 0">
-      Clear all filters
-    </button>
-  </div>
+  </section>
 
 </div>

@@ -28,7 +28,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from app.config import settings
-from app.database import get_db, optimize_fts, rebuild_fts
+from app.database import get_db, optimize_fts, rebuild_fts, refresh_jobs_total
 from app.services import cache as cache_svc
 from app.services import manifest as manifest_svc
 
@@ -878,6 +878,7 @@ async def run_ingestion(
                  len(ats_names), total_upserted, rows_pruned, "success",
                  duration),
             )
+            refresh_jobs_total(conn)
             cache_svc.bump_jobs_cache_version()
         try:
             catalog_sync = await catalog_sync_task

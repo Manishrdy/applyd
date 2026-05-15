@@ -1,0 +1,666 @@
+{% extends "public_base.html" %}
+
+{% block title %}Create your account{% endblock %}
+
+{% block head %}
+<style>
+  /* ------------------------------------------------------------------
+     Auth-page primitives — mirrors signin.html so both pages feel
+     like the same product. Scoped under .auth.
+  ------------------------------------------------------------------ */
+  .auth {
+    --auth-grid: hsl(var(--border) / 0.5);
+  }
+
+  .auth-brand {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+  }
+  .auth-brand::before {
+    content: "";
+    position: absolute; inset: 0; z-index: -2;
+    background:
+      radial-gradient(48rem 32rem at 0% 0%,    hsl(var(--accent) / 0.22), transparent 60%),
+      radial-gradient(42rem 28rem at 100% 100%, hsl(var(--info)   / 0.14), transparent 60%),
+      radial-gradient(28rem 20rem at 80% 0%,   hsl(var(--warning) / 0.10), transparent 65%);
+  }
+  .auth-brand::after {
+    content: "";
+    position: absolute; inset: 0; z-index: -1;
+    background-image:
+      linear-gradient(to right, var(--auth-grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--auth-grid) 1px, transparent 1px);
+    background-size: 56px 56px;
+    -webkit-mask-image: radial-gradient(70% 60% at 50% 50%, black 20%, transparent 75%);
+            mask-image: radial-gradient(70% 60% at 50% 50%, black 20%, transparent 75%);
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  .auth-h {
+    font-size: clamp(2.25rem, 4vw, 3.25rem);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.028em;
+  }
+  .auth-accent {
+    background: linear-gradient(135deg, hsl(var(--accent)) 0%, hsl(var(--warning)) 100%);
+    -webkit-background-clip: text;
+            background-clip: text;
+    -webkit-text-fill-color: transparent;
+            color: transparent;
+  }
+
+  /* Bulleted value-prop list on the brand side. */
+  .auth-benefits {
+    display: grid; gap: 0.875rem;
+    max-width: 32rem;
+  }
+  .auth-benefit {
+    display: flex; align-items: flex-start; gap: 0.875rem;
+    padding: 0.875rem 1rem;
+    border-radius: 0.75rem;
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--surface-elevated) / 0.55);
+    backdrop-filter: blur(6px);
+    transition: border-color 200ms ease, transform 200ms ease;
+  }
+  .auth-benefit:hover {
+    border-color: hsl(var(--accent) / 0.45);
+    transform: translateY(-1px);
+  }
+  .auth-benefit-icon {
+    display: grid; place-items: center;
+    width: 2.25rem; height: 2.25rem; flex-shrink: 0;
+    border-radius: 0.625rem;
+    background: linear-gradient(135deg,
+                hsl(var(--accent) / 0.18),
+                hsl(var(--accent) / 0.06));
+    color: hsl(var(--accent));
+    border: 1px solid hsl(var(--accent) / 0.18);
+  }
+  .auth-benefit p { font-size: 0.875rem; line-height: 1.55; }
+  .auth-benefit strong { color: hsl(var(--text)); font-weight: 600; }
+
+  /* KPI strip on the brand side. */
+  .auth-kpis {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid hsl(var(--border));
+  }
+  .auth-kpi-num {
+    font-size: clamp(1.5rem, 2.4vw, 2rem);
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .auth-kpi-label {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: hsl(var(--text-subtle));
+    margin-top: 0.4rem;
+  }
+
+  /* Form-side container — soft card on wider screens. */
+  .auth-form-card {
+    background: hsl(var(--surface-elevated) / 0.6);
+    border: 1px solid hsl(var(--border) / 0);
+    border-radius: var(--radius-lg);
+    padding: 0;
+    transition: border-color 200ms ease, box-shadow 200ms ease;
+  }
+  @media (min-width: 1024px) {
+    .auth-form-card {
+      padding: 2rem;
+      border-color: hsl(var(--border));
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(6px);
+    }
+  }
+
+  /* Float-label inputs. */
+  .auth-field { position: relative; }
+  .auth-field input.auth-input {
+    width: 100%;
+    height: 3rem;
+    padding: 1.25rem 0.875rem 0.4rem;
+    font-size: 0.9375rem;
+    background-color: hsl(var(--surface-elevated));
+    color: hsl(var(--text));
+    border: 1px solid hsl(var(--border));
+    border-radius: 0.625rem;
+    transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
+  }
+  .auth-field input.auth-input:hover { border-color: hsl(var(--border-strong)); }
+  .auth-field input.auth-input:focus {
+    outline: none;
+    border-color: hsl(var(--ring));
+    box-shadow: 0 0 0 4px hsl(var(--ring) / 0.18);
+    background-color: hsl(var(--surface-elevated));
+  }
+  .auth-field input.auth-input.has-pad { padding-right: 2.75rem; }
+  .auth-field label.auth-label {
+    position: absolute;
+    left: 0.875rem;
+    top: 0.95rem;
+    font-size: 0.875rem;
+    color: hsl(var(--text-subtle));
+    pointer-events: none;
+    transform-origin: left top;
+    transition: transform 140ms ease, color 140ms ease;
+  }
+  .auth-field input.auth-input:focus + .auth-label,
+  .auth-field input.auth-input:not(:placeholder-shown) + .auth-label {
+    transform: translateY(-0.7rem) scale(0.78);
+    color: hsl(var(--text-muted));
+    font-weight: 500;
+  }
+  .auth-field input.auth-input:focus + .auth-label { color: hsl(var(--accent)); }
+
+  .auth-eye {
+    position: absolute;
+    right: 0.5rem;
+    top: calc(0.75rem + 0.25rem);
+    display: grid; place-items: center;
+    height: 2rem; width: 2rem;
+    border-radius: 0.5rem;
+    color: hsl(var(--text-subtle));
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    transition: color 140ms ease, background-color 140ms ease;
+  }
+  .auth-eye:hover { color: hsl(var(--text)); background: hsl(var(--surface-muted)); }
+
+  .auth-cta {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+    width: 100%;
+    padding: 0.9rem 1.4rem;
+    background: hsl(var(--accent));
+    color: hsl(var(--accent-fg));
+    font-weight: 600;
+    font-size: 0.95rem;
+    border: none;
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+    transition: background-color 160ms ease, transform 160ms ease, box-shadow 200ms ease;
+    box-shadow: 0 4px 20px hsl(var(--accent) / 0.40),
+                0 1px 2px hsl(var(--accent) / 0.20);
+  }
+  .auth-cta:hover:not(:disabled) {
+    background: hsl(var(--accent-hover));
+    transform: translateY(-1px);
+    box-shadow: 0 12px 32px hsl(var(--accent) / 0.48),
+                0 1px 2px hsl(var(--accent) / 0.25);
+  }
+  .auth-cta:disabled { opacity: 0.7; cursor: progress; }
+
+  .auth-divider {
+    display: flex; align-items: center; gap: 0.75rem;
+    color: hsl(var(--text-subtle));
+    font-size: 0.6875rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-family: var(--font-mono);
+  }
+  .auth-divider::before,
+  .auth-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: hsl(var(--border));
+  }
+
+  .auth-sso {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+    width: 100%;
+    padding: 0.7rem 1rem;
+    border-radius: 0.625rem;
+    background: hsl(var(--surface-elevated));
+    color: hsl(var(--text-subtle));
+    border: 1px solid hsl(var(--border));
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: not-allowed;
+    transition: border-color 160ms ease;
+  }
+  .auth-sso[disabled]:hover { border-color: hsl(var(--border-strong)); }
+  .auth-sso-tag {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: hsl(var(--text-subtle));
+    background: hsl(var(--surface-muted));
+    border-radius: var(--radius-pill);
+    padding: 0.1rem 0.4rem;
+    margin-left: 0.25rem;
+  }
+
+  .auth-error {
+    display: flex; gap: 0.625rem; align-items: flex-start;
+    padding: 0.75rem 0.875rem;
+    border-radius: 0.625rem;
+    border: 1px solid hsl(var(--danger) / 0.35);
+    background: hsl(var(--danger) / 0.08);
+    color: hsl(var(--text));
+    font-size: 0.875rem;
+  }
+
+  /* Strength meter / rules — refined visual. */
+  .pw-meter-track {
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    gap: 0.25rem;
+  }
+  .pw-meter-track > span {
+    height: 4px; border-radius: 9999px;
+    background-color: hsl(var(--border) / 0.7);
+    transition: background-color 200ms ease;
+  }
+  .pw-rule {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    font-size: 0.75rem;
+    color: hsl(var(--text-subtle));
+    transition: color 140ms ease;
+  }
+  .pw-rule .rule-dot {
+    width: 6px; height: 6px; border-radius: 9999px;
+    background: hsl(var(--border-strong));
+    transition: background-color 160ms ease, transform 160ms ease;
+  }
+  .pw-rule.is-ok { color: hsl(var(--success)); }
+  .pw-rule.is-ok .rule-dot {
+    background: hsl(var(--success));
+    transform: scale(1.15);
+  }
+  .seg-weak    { background: hsl(var(--danger))  !important; }
+  .seg-fair    { background: hsl(var(--warning)) !important; }
+  .seg-good    { background: hsl(var(--info))    !important; }
+  .seg-strong  { background: hsl(var(--success)) !important; }
+
+  /* Inline checkbox label. */
+  .auth-tos {
+    display: flex; align-items: flex-start; gap: 0.5rem;
+    font-size: 0.8125rem;
+    color: hsl(var(--text-muted));
+    cursor: pointer;
+  }
+  .auth-tos input { margin-top: 0.15rem; }
+</style>
+{% endblock %}
+
+{% block main_wrapper %}
+<main class="flex-1 grid lg:grid-cols-5 auth">
+
+  {# ===== Left panel — value prop ===================================== #}
+  <aside class="auth-brand hidden lg:flex lg:col-span-3 relative flex-col justify-between
+                p-10 xl:p-14 border-r border-border-base/70">
+
+    <div class="space-y-9 relative z-10">
+      <a href="/" class="flex items-center gap-2 font-semibold tracking-tight w-fit">
+        <span class="grid h-8 w-8 place-items-center rounded-base bg-accent text-accent-fg text-sm font-bold shadow-soft-sm">a</span>
+        <span class="text-base">applyd</span>
+      </a>
+
+      <span class="pill w-fit">
+        <span class="live-dot"></span>
+        <span class="text-text">Free during preview — no card required</span>
+      </span>
+
+      <div class="space-y-4 max-w-lg">
+        <h2 class="auth-h text-balance">
+          One account.
+          <br><span class="auth-accent">Every fresh job.</span>
+        </h2>
+        <p class="text-text-muted text-lg text-pretty leading-relaxed">
+          Create your applyd account to search across 47 ATS platforms, save
+          the postings that matter, and reserve a seat for the auto-apply
+          agent shipping next.
+        </p>
+      </div>
+
+      <ul class="auth-benefits">
+        <li class="auth-benefit">
+          <span class="auth-benefit-icon">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+            </svg>
+          </span>
+          <p class="text-text-muted">
+            <strong>Unified search</strong> over Greenhouse, Lever, Ashby,
+            Workday and 43 others — filter by title, salary, freshness.
+          </p>
+        </li>
+        <li class="auth-benefit">
+          <span class="auth-benefit-icon">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+            </svg>
+          </span>
+          <p class="text-text-muted">
+            <strong>Sync your shortlist</strong> across devices — your
+            saves survive the day the original posting expires.
+          </p>
+        </li>
+        <li class="auth-benefit">
+          <span class="auth-benefit-icon">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2a10 10 0 1 0 10 10"/><path d="m4.93 4.93 4.24 4.24"/><path d="M12 12 22 2"/>
+            </svg>
+          </span>
+          <p class="text-text-muted">
+            <strong>Reserve auto-apply</strong> — your saved postings
+            become the agent's first work queue the moment it ships.
+          </p>
+        </li>
+      </ul>
+
+      <div class="auth-kpis max-w-lg">
+        <div>
+          <p class="auth-kpi-num">3.8M+</p>
+          <p class="auth-kpi-label">Jobs indexed</p>
+        </div>
+        <div>
+          <p class="auth-kpi-num">47</p>
+          <p class="auth-kpi-label">ATS platforms</p>
+        </div>
+        <div>
+          <p class="auth-kpi-num">24h</p>
+          <p class="auth-kpi-label">Refresh cadence</p>
+        </div>
+      </div>
+    </div>
+
+    <p class="text-xs text-text-subtle relative z-10 mt-10">
+      © applyd · powered by the open
+      <a href="https://data.stapply.ai/" target="_blank" rel="noopener"
+         class="hover:text-text underline decoration-dotted underline-offset-2">jobhive</a>
+      dataset (MIT)
+    </p>
+  </aside>
+
+  {# ===== Right panel — form ========================================== #}
+  <section class="lg:col-span-2 flex items-center justify-center p-6 sm:p-10 lg:p-12">
+    <div class="w-full max-w-md space-y-7">
+
+      <div class="lg:hidden flex flex-col items-start gap-3">
+        <span class="pill">
+          <span class="live-dot"></span>
+          <span class="text-text">Free during preview · no card</span>
+        </span>
+      </div>
+
+      <div class="auth-form-card space-y-6">
+        <div class="space-y-2">
+          <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Create your account</h1>
+          <p class="text-sm text-text-muted">
+            Already have one?
+            <a class="text-accent hover:underline font-medium" href="/signin">Sign in →</a>
+          </p>
+        </div>
+
+        {% if error_message %}
+        <div class="auth-error" role="alert" aria-live="assertive">
+          <svg class="h-4 w-4 text-danger shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
+          </svg>
+          <p>{{ error_message }}</p>
+        </div>
+        {% endif %}
+
+        <div class="grid grid-cols-2 gap-2">
+          <button type="button" class="auth-sso" disabled aria-disabled="true">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 4 10 15 15 0 0 1-4 10 15 15 0 0 1-4-10 15 15 0 0 1 4-10z"/>
+            </svg>
+            Google
+            <span class="auth-sso-tag">Soon</span>
+          </button>
+          <button type="button" class="auth-sso" disabled aria-disabled="true">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-2.1c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.47.11-3.06 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.79 0c2.21-1.49 3.18-1.18 3.18-1.18.63 1.59.23 2.77.11 3.06.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z"/>
+            </svg>
+            GitHub
+            <span class="auth-sso-tag">Soon</span>
+          </button>
+        </div>
+
+        <div class="auth-divider">Or with email</div>
+
+        <form id="signup-form" class="space-y-4" method="post" action="/signup" autocomplete="on" novalidate>
+          <input type="hidden" name="next" value="{{ next_url }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+          <div class="auth-field">
+            <input id="signup-name"
+                   class="auth-input"
+                   type="text"
+                   name="name"
+                   placeholder=" "
+                   autocomplete="name"
+                   autocapitalize="words"
+                   spellcheck="false"
+                   autofocus
+                   required
+                   minlength="1"
+                   maxlength="120">
+            <label for="signup-name" class="auth-label">Full name</label>
+          </div>
+
+          <div class="auth-field">
+            <input id="signup-email"
+                   class="auth-input"
+                   type="email"
+                   name="email"
+                   placeholder=" "
+                   autocomplete="email"
+                   inputmode="email"
+                   spellcheck="false"
+                   autocapitalize="off"
+                   required
+                   maxlength="254">
+            <label for="signup-email" class="auth-label">Your email</label>
+          </div>
+
+          <div class="space-y-2.5">
+            <div class="auth-field">
+              <input id="signup-password"
+                     class="auth-input has-pad"
+                     type="password"
+                     name="password"
+                     placeholder=" "
+                     autocomplete="new-password"
+                     minlength="10"
+                     maxlength="128"
+                     required
+                     aria-describedby="signup-pw-meter signup-pw-rules signup-caps-warning">
+              <label for="signup-password" class="auth-label">Password (10+ characters)</label>
+              <button type="button"
+                      id="signup-toggle-password"
+                      class="auth-eye"
+                      aria-label="Show password"
+                      aria-pressed="false"
+                      tabindex="-1">
+                <svg data-eye="closed" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>
+                </svg>
+                <svg data-eye="open" class="h-4 w-4 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-10-7-10-7a17.5 17.5 0 0 1 4.06-5.06"/>
+                  <path d="M9.9 4.24A10.05 10.05 0 0 1 12 4c7 0 10 7 10 7a17.5 17.5 0 0 1-2.16 3.19"/>
+                  <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="2" y1="2" x2="22" y2="22"/>
+                </svg>
+              </button>
+            </div>
+
+            {# Strength meter — 5 segments, color graduates from danger → success. #}
+            <div id="signup-pw-meter"
+                 class="flex items-center gap-2"
+                 role="progressbar"
+                 aria-valuemin="0"
+                 aria-valuemax="5"
+                 aria-valuenow="0"
+                 aria-label="Password strength">
+              <div class="pw-meter-track flex-1">
+                <span data-seg="1"></span>
+                <span data-seg="2"></span>
+                <span data-seg="3"></span>
+                <span data-seg="4"></span>
+                <span data-seg="5"></span>
+              </div>
+              <span id="signup-pw-label" class="text-xs text-text-subtle tabular-nums w-16 text-right">—</span>
+            </div>
+
+            {# Live criteria checklist. #}
+            <ul id="signup-pw-rules" class="grid grid-cols-2 gap-x-3 gap-y-1.5 pt-1">
+              <li data-rule="length" class="pw-rule"><span class="rule-dot"></span>10+ characters</li>
+              <li data-rule="upper"  class="pw-rule"><span class="rule-dot"></span>Uppercase</li>
+              <li data-rule="lower"  class="pw-rule"><span class="rule-dot"></span>Lowercase</li>
+              <li data-rule="digit"  class="pw-rule"><span class="rule-dot"></span>Number</li>
+              <li data-rule="symbol" class="pw-rule col-span-2"><span class="rule-dot"></span>Symbol (e.g. <span class="font-mono">!@#$%</span>)</li>
+            </ul>
+
+            <p id="signup-caps-warning"
+               class="text-xs text-warning hidden flex items-center gap-1.5"
+               role="status">
+              <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2 4 12h5v8h6v-8h5z"/>
+              </svg>
+              Caps Lock is on.
+            </p>
+          </div>
+
+          <label class="auth-tos pt-1">
+            <input id="signup-terms" type="checkbox" required class="h-3.5 w-3.5">
+            <span>
+              I agree to applyd's
+              <a href="/" class="text-text hover:text-accent underline decoration-dotted underline-offset-2">terms</a>
+              and
+              <a href="/" class="text-text hover:text-accent underline decoration-dotted underline-offset-2">privacy policy</a>.
+            </span>
+          </label>
+
+          <button type="submit" id="signup-submit" class="auth-cta">
+            <span data-state="idle" class="inline-flex items-center gap-2">
+              Create account
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+              </svg>
+            </span>
+            <span data-state="pending" class="hidden items-center gap-2">
+              <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+              </svg>
+              Creating account…
+            </span>
+          </button>
+
+          <p class="flex items-center justify-center gap-1.5 text-xs text-text-subtle pt-1">
+            <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+            Passwords hashed with PBKDF2-SHA256 · 120k rounds
+          </p>
+        </form>
+      </div>
+    </div>
+  </section>
+
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ request.state.csp_nonce }}">
+  (function () {
+    const pwd    = document.getElementById("signup-password");
+    const toggle = document.getElementById("signup-toggle-password");
+    const caps   = document.getElementById("signup-caps-warning");
+    const meter  = document.getElementById("signup-pw-meter");
+    const label  = document.getElementById("signup-pw-label");
+    const rules  = document.getElementById("signup-pw-rules");
+    const form   = document.getElementById("signup-form");
+    const submit = document.getElementById("signup-submit");
+
+    if (toggle && pwd) {
+      toggle.addEventListener("click", function () {
+        const showing = pwd.type === "text";
+        pwd.type = showing ? "password" : "text";
+        toggle.setAttribute("aria-pressed", String(!showing));
+        toggle.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+        toggle.querySelector('[data-eye="closed"]').classList.toggle("hidden", !showing);
+        toggle.querySelector('[data-eye="open"]').classList.toggle("hidden", showing);
+      });
+    }
+
+    function updateCaps(e) {
+      if (!caps || typeof e.getModifierState !== "function") return;
+      caps.classList.toggle("hidden", !e.getModifierState("CapsLock"));
+    }
+    if (pwd) {
+      pwd.addEventListener("keydown", updateCaps);
+      pwd.addEventListener("keyup", updateCaps);
+      pwd.addEventListener("blur", function () { caps && caps.classList.add("hidden"); });
+    }
+
+    // Server-truth rules — keep in sync with validate_password_strength() in app/auth.py.
+    const RULES = {
+      length: function (v) { return v.length >= 10; },
+      upper:  function (v) { return /[A-Z]/.test(v); },
+      lower:  function (v) { return /[a-z]/.test(v); },
+      digit:  function (v) { return /\d/.test(v); },
+      symbol: function (v) { return /[!-/:-@\[-`{-~]/.test(v); },
+    };
+    const SEG_TONE = ["seg-weak", "seg-weak", "seg-fair", "seg-good", "seg-strong"];
+    const LABEL    = ["Too short", "Weak", "Fair", "Good", "Strong"];
+
+    function scorePassword(v) {
+      let score = 0;
+      for (const key in RULES) if (RULES[key](v)) score++;
+      if (score === 5 && v.length >= 16) return 5;
+      return score;
+    }
+
+    function paintMeter(score) {
+      if (!meter) return;
+      const segs = meter.querySelectorAll("[data-seg]");
+      const tone = SEG_TONE[Math.max(0, score - 1)] || "seg-weak";
+      segs.forEach(function (el, i) {
+        ["seg-weak","seg-fair","seg-good","seg-strong"].forEach(function (c) { el.classList.remove(c); });
+        if (i < score) el.classList.add(tone);
+      });
+      meter.setAttribute("aria-valuenow", String(score));
+      if (label) label.textContent = score === 0 ? "—" : LABEL[score - 1];
+    }
+
+    function paintRules(v) {
+      if (!rules) return;
+      rules.querySelectorAll("[data-rule]").forEach(function (li) {
+        const key = li.getAttribute("data-rule");
+        li.classList.toggle("is-ok", !!RULES[key] && RULES[key](v));
+      });
+    }
+
+    if (pwd) {
+      pwd.addEventListener("input", function () {
+        const v = pwd.value;
+        paintMeter(scorePassword(v));
+        paintRules(v);
+      });
+    }
+
+    if (form && submit) {
+      form.addEventListener("submit", function () {
+        submit.disabled = true;
+        const idle = submit.querySelector('[data-state="idle"]');
+        const pending = submit.querySelector('[data-state="pending"]');
+        if (idle) idle.classList.add("hidden");
+        if (pending) { pending.classList.remove("hidden"); pending.classList.add("inline-flex"); }
+      });
+    }
+  })();
+</script>
+{% endblock %}

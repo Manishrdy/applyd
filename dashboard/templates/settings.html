@@ -84,6 +84,57 @@
       </div>
     </div>
 
+    <div class="card p-4 flex flex-wrap items-center justify-between gap-3 storage-sync-row">
+      <div class="space-y-1">
+        <p class="text-sm">
+          Reclaimable space
+          <span class="font-medium tabular" x-text="fmtBytes(info?.db_reclaimable_bytes)"></span>
+          <span class="text-text-muted" x-show="info?.db_reclaimable_bytes">
+            · across <span class="tabular" x-text="fmtNum(Math.round((info?.db_reclaimable_bytes || 0) / 4096))"></span> free pages
+          </span>
+        </p>
+        <p class="text-xs text-text-subtle">
+          <template x-if="info?.db_last_vacuum_at">
+            <span>Last VACUUM <span x-text="fmtTime(info.db_last_vacuum_at)"></span>.</span>
+          </template>
+          <template x-if="!info?.db_last_vacuum_at">
+            <span>VACUUM has not run yet on this database.</span>
+          </template>
+          Rewrites the SQLite file; can take minutes on a large DB.
+        </p>
+      </div>
+
+      <div class="settings-actions-clean flex items-center gap-2">
+        <button type="button"
+                class="btn btn-secondary btn-sm"
+                :disabled="isVacuuming"
+                @click="reclaimSpace()">
+          <svg class="h-3.5 w-3.5" :class="{ 'animate-spin': isVacuuming }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          <span x-text="isVacuuming ? 'Reclaiming…' : 'Reclaim space'"></span>
+        </button>
+      </div>
+    </div>
+
+    <div x-show="vacuumResult" class="toast"
+         :class="{ 'border-success': vacuumResult?.status === 'success', 'border-danger': vacuumResult?.status === 'failed' }">
+      <div class="flex items-start gap-3">
+        <div class="flex-1 text-sm">
+          <span x-show="vacuumResult?.status === 'success'" class="text-text">
+            ✓ Reclaimed <span class="tabular" x-text="fmtBytes(vacuumResult?.reclaimed_bytes)"></span>
+            in <span x-text="fmtDuration(vacuumResult?.duration_seconds)"></span>
+            (<span class="tabular" x-text="fmtBytes(vacuumResult?.size_before_bytes)"></span>
+            → <span class="tabular" x-text="fmtBytes(vacuumResult?.size_after_bytes)"></span>).
+          </span>
+          <span x-show="vacuumResult?.status === 'failed'" class="text-danger">
+            ✗ Reclaim failed: <span x-text="vacuumResult?.error" class="text-text-muted"></span>
+          </span>
+        </div>
+        <button class="btn btn-ghost btn-icon" @click="vacuumResult = null" aria-label="Dismiss">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+    </div>
+
     <div x-show="refreshResult" class="toast"
          :class="{ 'border-success': refreshResult?.status === 'success', 'border-danger': refreshResult?.status === 'failed' }">
       <div class="flex items-start gap-3">

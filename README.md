@@ -20,13 +20,21 @@ Job discovery is fragmented. Every ATS has different structures, quality, and up
 
 ## Product Overview
 
-### MS1: Dashboard (active)
+### MS1: Dashboard Service (active)
 A FastAPI + Jinja2 application for:
 
 - Searching jobs across ATS providers
 - Filtering by recency, country, salary, employment type, remote, etc.
 - Saving jobs for later action
 - Running local scraper jobs with live progress, logs, and run history
+
+### Identity Service (active)
+A separate FastAPI service for:
+
+- Landing page
+- Sign in / Sign up / Logout
+- Session issuance and verification
+- Redirecting authenticated users into dashboard
 
 ### MS2: Auto-Apply Agent (planned)
 A future service that will consume curated/saved jobs and automate application workflows.
@@ -63,19 +71,17 @@ A future service that will consume curated/saved jobs and automate application w
 ## Architecture at a glance
 
 ```text
-Upstream jobhive parquet sources
+Identity Service (:8100)
+  - Landing/Auth pages
+  - users + auth_sessions
           |
           v
-Daily ingestion scheduler (APScheduler)
+Dashboard Service (:8000)
+  - Protected UI + APIs
+  - Verifies session with identity-service
           |
           v
 SQLite (jobs, saved_jobs, logs, scrape runs)
-          |
-          +--> Dashboard APIs (FastAPI)
-          |
-          +--> UI (Jinja2 + AlpineJS)
-          |
-          +--> Local scraper subprocess orchestration
 ```
 
 ### Important data paths
@@ -95,9 +101,39 @@ applyd/
 │  ├─ static/                 # frontend assets
 │  ├─ templates/              # UI templates
 │  └─ vendor/                 # vendored scraper dependencies + shim
+├─ identity-service/          # Landing + auth (FastAPI + Jinja2)
 ├─ agent/                     # MS2 (planned)
 └─ README.md
 ```
+
+---
+
+## Make Commands (Quick Reference)
+
+Run these from the repo root. `make help` prints the same list inside the terminal.
+
+| Command | When to use it | What it does |
+| --- | --- | --- |
+| `make setup` | Fresh clone, or whenever a `pyproject.toml` changes | Installs Python deps for both services (`uv sync`) |
+| `make setup-identity` | Only identity-service deps changed | Installs identity-service deps only |
+| `make setup-dashboard` | Only dashboard deps changed | Installs dashboard deps only |
+| `make init` | Once after `setup`, or after wiping `dashboard/data/` | Creates the dashboard SQLite DB and schema |
+| `make ingest` | After `init`, or whenever you want fresh job data | Runs one upstream ingestion cycle into the dashboard DB |
+| `make dev` | Bootstrapping a brand-new clone end-to-end | Runs `setup` → `init` → `ingest` in order |
+| `make run-dashboard` (alias: `make run`) | Day-to-day — to start the dashboard | Starts dashboard on `:8000` with `--reload` |
+| `make run-identity` | Day-to-day — second terminal, for landing/auth | Starts identity-service on `:8100` with `--reload` |
+| `make build-css` | After adding/renaming a Tailwind class in any template | Rebuilds `dashboard/static/css/app.css` and mirrors it to `identity-service/` |
+| `make watch-css` | While iterating heavily on UI | Rebuilds dashboard CSS on file changes (run `make build-css` once at the end to mirror into identity-service) |
+| `make test` | Before pushing changes | Runs the dashboard pytest suite |
+| `make clean` | Rarely | Clears pytest cache |
+
+**Typical workflows:**
+
+- *Fresh clone:* `make dev`
+- *Pulled new code, deps may have changed:* `make setup`
+- *Working on the UI:* terminal 1 → `make run-dashboard` · terminal 2 → `make run-identity` · terminal 3 → `make watch-css`
+- *Added a new Tailwind class:* `make build-css` (or rely on `watch-css` if it's running)
+- *Want fresher job data:* `make ingest`
 
 ---
 
@@ -123,6 +159,12 @@ Install these on your machine:
 ```bash
 cd dashboard
 uv sync
+```
+
+Or from repo root:
+
+```bash
+make setup
 ```
 
 ### 4) Configure environment
@@ -161,6 +203,13 @@ uv run python -m app.cli ingest
 uv run python -m app.cli stats
 ```
 
+Or from repo root:
+
+```bash
+make init
+make ingest
+```
+
 What this does:
 
 - Creates SQLite schema
@@ -168,13 +217,34 @@ What this does:
 - Ingests upstream jobs into local DB
 - Prints health/stats summary
 
-### 7) Run the dashboard app
+### 7) Run identity + dashboard services
 
 ```bash
-uv run uvicorn app.main:app --reload
+make run-identity
 ```
 
-Open: [http://localhost:8000](http://localhost:8000)
+In another terminal:
+
+```bash
+make run-dashboard
+```
+
+Open:
+
+- Identity (landing/auth): [http://localhost:8100](http://localhost:8100)
+- Dashboard (protected): [http://localhost:8000/dashboard](http://localhost:8000/dashboard)
+
+Or from repo root:
+
+```bash
+make run
+```
+
+Runtime flow in browser:
+
+1. `http://localhost:8100/` -> landing page
+2. `http://localhost:8100/signin` or `/signup` -> auth
+3. Successful login/signup redirects to `http://localhost:8000/dashboard`
 
 ### 8) Trigger ingest manually (optional)
 

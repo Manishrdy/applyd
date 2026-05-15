@@ -36,6 +36,13 @@ dashboard/data/
 dashboard/cache/
 dashboard/.venv/
 dashboard/uv.lock.local
+identity-service/data/
+identity-service/.venv/
+identity-service/uv.lock.local
+
+# Top-level dev scratch (parquet cache, throwaway DB)
+/cache/
+/data/
 
 # Generated CSS (build artifact from `tailwindcss -i input.css -o app.css`)
 dashboard/static/css/app.css

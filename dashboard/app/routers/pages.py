@@ -10,11 +10,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import settings
-from app.database import get_db
+from app.database import cached_jobs_total, get_db
 from app.services import query as q
 
 router = APIRouter()
@@ -46,8 +46,8 @@ def _ago(iso_str: str | None) -> str:
 
 def _transparency() -> dict:
     """Header pill data — total visible jobs, window, freshness."""
+    total = cached_jobs_total()
     with get_db() as conn:
-        total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         last = conn.execute(
             "SELECT fetched_at FROM manifest_log "
             "WHERE status='success' ORDER BY id DESC LIMIT 1"
@@ -62,8 +62,8 @@ def _transparency() -> dict:
 def _summary() -> dict | None:
     """Cheap summary for the index placeholder cards."""
     try:
+        total = cached_jobs_total()
         with get_db() as conn:
-            total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
             us_24h = conn.execute(
                 "SELECT COUNT(*) FROM jobs "
                 "WHERE country='US' AND COALESCE(posted_at, first_seen_at) >= datetime('now', '-24 hours')"
@@ -86,6 +86,11 @@ def _summary() -> dict | None:
 
 
 @router.get("/", response_class=HTMLResponse)
+def landing_root(request: Request):
+    return RedirectResponse(url="/dashboard", status_code=303)
+
+
+@router.get("/dashboard", response_class=HTMLResponse)
 def index(request: Request):
     """Phase 4 unified search-first dashboard.
 

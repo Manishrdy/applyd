@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.config import settings
-from app.database import get_db
+from app.database import db_reclaimable_bytes, get_db, last_vacuum_at, vacuum_db
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 
 class IngestLogRow(BaseModel):
@@ -33,6 +35,8 @@ class SettingsInfo(BaseModel):
     # storage
     db_path: str
     db_size_bytes: int
+    db_reclaimable_bytes: int
+    db_last_vacuum_at: str | None
     cache_dir: str
     cache_size_bytes: int
     total_jobs: int
@@ -70,10 +74,14 @@ def info() -> SettingsInfo:
     with get_db() as conn:
         total_jobs = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         total_saved = conn.execute("SELECT COUNT(*) FROM saved_jobs").fetchone()[0]
+        reclaimable = db_reclaimable_bytes(conn)
+    last_vac = last_vacuum_at()
 
     return SettingsInfo(
         db_path=db_path,
         db_size_bytes=db_size,
+        db_reclaimable_bytes=reclaimable,
+        db_last_vacuum_at=last_vac.isoformat() if last_vac else None,
         cache_dir=cache_dir,
         cache_size_bytes=cache_size,
         total_jobs=total_jobs,
@@ -97,6 +105,40 @@ def by_ats_full() -> list[AtsCount]:
             "GROUP BY ats_type ORDER BY n DESC"
         ).fetchall()
     return [AtsCount(ats_type=r["ats_type"], count=r["n"]) for r in rows]
+
+
+class VacuumResult(BaseModel):
+    size_before_bytes: int
+    size_after_bytes: int
+    reclaimed_bytes: int
+    free_pages_before: int
+    free_pages_after: int
+    duration_seconds: float
+    last_vacuum_at: str
+
+
+@router.post("/vacuum", response_model=VacuumResult)
+def vacuum() -> VacuumResult:
+    """Manually reclaim free pages via SQLite VACUUM. Blocking; can take minutes."""
+    try:
+        result = vacuum_db()
+    except Exception as e:
+        log.exception("manual VACUUM failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    log.info(
+        "manual VACUUM reclaimed %.1f MB in %.1fs",
+        result["reclaimed_bytes"] / (1024 * 1024),
+        result["duration_seconds"],
+    )
+    return VacuumResult(
+        size_before_bytes=result["size_before_bytes"],
+        size_after_bytes=result["size_after_bytes"],
+        reclaimed_bytes=result["reclaimed_bytes"],
+        free_pages_before=result["free_pages_before"],
+        free_pages_after=result["free_pages_after"],
+        duration_seconds=result["duration_seconds"],
+        last_vacuum_at=result["last_vacuum_at"],
+    )
 
 
 @router.get("/ingest_log", response_model=list[IngestLogRow])

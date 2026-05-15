@@ -13,6 +13,8 @@ function settingsPage() {
     isLoading: true,
     isRefreshing: false,
     refreshResult: null,
+    isVacuuming: false,
+    vacuumResult: null,
     error: null,
 
     async init() {
@@ -35,6 +37,23 @@ function settingsPage() {
         this.error = e.message || "Failed to load settings";
       } finally {
         this.isLoading = false;
+      }
+    },
+
+    async reclaimSpace() {
+      if (this.isVacuuming) return;
+      this.isVacuuming = true;
+      this.vacuumResult = null;
+      try {
+        const r = await fetch("/api/settings/vacuum", { method: "POST" });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+        this.vacuumResult = { status: "success", ...data };
+        await this.fetchAll();
+      } catch (e) {
+        this.vacuumResult = { status: "failed", error: e.message };
+      } finally {
+        this.isVacuuming = false;
       }
     },
 

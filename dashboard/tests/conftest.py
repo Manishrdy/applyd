@@ -84,6 +84,26 @@ def client(test_db_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
     monkeypatch.setattr(main, "start_scheduler", lambda: None)
     monkeypatch.setattr(main, "stop_scheduler", lambda: None)
+    monkeypatch.setattr(settings, "identity_service_url", "http://identity.test")
+
+    class _FakeResponse:
+        status_code = 200
+
+    class _FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, *args, **kwargs):
+            return _FakeResponse()
+
+    monkeypatch.setattr(main.httpx, "AsyncClient", _FakeAsyncClient)
 
     with TestClient(main.app, raise_server_exceptions=False) as test_client:
+        test_client.cookies.set("applyd_session", "test-token")
         yield test_client

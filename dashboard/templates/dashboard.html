@@ -13,25 +13,28 @@
    Header search — hijacks base.html's placeholder slot.
 ================================================================= #}
 {% block header_search %}
-<div class="relative flex-1 max-w-xl">
+<div class="relative flex-1 max-w-xl group">
   <input type="search"
-         class="input pl-9"
+         class="input pl-9 pr-16 transition-shadow"
          placeholder="Search jobs, companies, skills…"
          aria-label="Search"
          x-model.debounce.300ms="filters.q"
          @input.debounce.300ms="onFilterChange()">
-  <svg class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-subtle"
+  <svg class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-subtle group-focus-within:text-accent transition-colors"
        viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
        stroke-linecap="round" stroke-linejoin="round">
     <circle cx="11" cy="11" r="8"/>
     <path d="m21 21-4.3-4.3"/>
   </svg>
+  <kbd class="absolute right-2.5 top-1/2 -translate-y-1/2 hidden sm:inline-flex items-center gap-0.5
+              px-1.5 h-5 rounded-base border border-border-base/80 bg-surface-muted/80
+              text-[10px] font-mono text-text-subtle tabular pointer-events-none">⌘K</kbd>
 </div>
 {% endblock %}
 
 {% block nav_extra %}
 <nav class="hidden xl:flex items-center gap-1 rounded-pill border border-border-base/80 bg-surface-elevated/75 p-1 backdrop-blur-md">
-  <a href="/"
+  <a href="/dashboard"
      class="inline-flex items-center rounded-pill bg-accent px-3 py-1.5 text-xs font-semibold text-accent-fg shadow-soft-sm">
     Jobs
   </a>
@@ -51,16 +54,15 @@
 {% endblock %}
 
 {# ============================================================
-   Reusable sidebar markup — rendered twice (sticky desktop +
-   teleported mobile drawer) via `_components/_filter_sidebar.html`.
+   Main layout — sticky filter sidebar + results column.
 ================================================================= #}
 {% block main %}
 
-<div class="grid lg:grid-cols-[280px_1fr] gap-6">
+<div class="grid lg:grid-cols-[300px_1fr] gap-6 xl:gap-8">
 
-  {# ---- Mobile filter trigger ---- #}
-  <div class="lg:hidden flex items-center justify-between">
-    <button class="btn btn-secondary" @click="drawerOpen = true">
+  {# ===== Mobile filter trigger row ============================ #}
+  <div class="lg:hidden flex items-center justify-between gap-3">
+    <button type="button" class="btn btn-secondary" @click="drawerOpen = true">
       <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/>
       </svg>
@@ -70,20 +72,20 @@
             class="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent text-accent-fg text-xs px-1 tabular"></span>
     </button>
     <p class="text-sm text-text-muted">
-      <span class="text-text font-medium tabular" x-text="total.toLocaleString()"></span> jobs
+      <span class="text-text font-semibold tabular" x-text="total.toLocaleString()"></span> jobs
     </p>
   </div>
 
-  {# ---- Desktop sticky sidebar ---- #}
+  {# ===== Desktop sticky sidebar =============================== #}
   <aside class="hidden lg:block">
     <div class="sticky top-20 max-h-[calc(100dvh-6rem)] overflow-y-auto pr-1 -mr-1">
-      <div class="card card-elevated p-4">
+      <div class="filter-card">
         {% include "_components/_filter_sidebar.html" %}
       </div>
     </div>
   </aside>
 
-  {# ---- Mobile drawer ---- #}
+  {# ===== Mobile drawer ======================================== #}
   <template x-teleport="body">
     <div>
       <div x-show="drawerOpen"
@@ -103,12 +105,12 @@
              style="display: none;">
         <div class="p-4">
           <div class="flex items-center justify-between mb-4">
-            <h2 class="text-lg font-semibold">Filters</h2>
+            <h2 class="text-lg font-semibold tracking-tight">Filters</h2>
             <button type="button" class="btn btn-ghost btn-icon" @click="drawerOpen = false" aria-label="Close">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
             </button>
           </div>
-          <div class="card card-elevated p-4">
+          <div class="filter-card">
             {% include "_components/_filter_sidebar.html" %}
           </div>
         </div>
@@ -116,42 +118,69 @@
     </div>
   </template>
 
-  {# ===== MAIN COLUMN =================================================== #}
-  <section class="min-w-0 space-y-4">
+  {# ===== Main results column ================================== #}
+  <section class="min-w-0 space-y-5">
 
-    {# Result count header + sort #}
-    <div class="flex flex-wrap items-end justify-between gap-3">
-      <div>
-        <h1 class="text-2xl font-semibold tracking-tight">
+    {# ---- Results toolbar — heading, sort, view, freshly added ---- #}
+    <div class="results-toolbar">
+      <div class="min-w-0">
+        <h1 class="results-heading">
           <span class="tabular" x-text="total.toLocaleString()"></span>
-          jobs
+          <span class="text-text-muted font-normal">jobs</span>
         </h1>
-        <p class="text-sm text-text-muted">
-          <span x-text="filters.country.includes('US') ? 'United States · ' : ''"></span>
+        <p class="results-sub">
+          <span x-show="filters.country.includes('US')">United States</span>
+          <span x-show="filters.country.length === 0 || (!filters.country.includes('US'))">All countries</span>
+          <span class="text-text-subtle px-1">·</span>
           <span x-text="POSTED_OPTIONS.find(o => o.value === filters.posted_hours)?.label.toLowerCase()"></span>
+          <template x-if="filters.q">
+            <span><span class="text-text-subtle px-1">·</span> matching <span class="text-text font-medium">"<span x-text="filters.q"></span>"</span></span>
+          </template>
         </p>
       </div>
 
-      <div class="flex items-center gap-2 flex-wrap">
+      <div class="results-controls">
+        {# Freshly-added toggle — surfaces rows ingested in last 6h. #}
         <button type="button"
                 class="btn btn-sm"
                 :class="freshlyAddedActive() ? 'btn-primary' : 'btn-secondary'"
                 @click="toggleFreshlyAdded(6)"
-                title="Filter to rows we first ingested in the last 6 hours (use after a manual scrape)">
+                title="Filter to rows we first ingested in the last 6 hours">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
           </svg>
-          Freshly added (6h)
+          Freshly added
+          <span class="text-[10px] font-mono opacity-70">6h</span>
         </button>
 
-        <label for="sort-select" class="text-sm text-text-muted ml-2">Sort</label>
-        {# Options are written out statically rather than via <template x-for>:
-           the HTML parser disallows non-<option>/<optgroup> children inside
-           <select>, so the <template> wrapper can confuse the popover and
-           make options appear flat/uninteractive in some browsers. #}
+        {# View toggle — grid / list. Lives on the dashboard() scope and
+           persists to localStorage via setView(). #}
+        <div class="results-view" role="tablist" aria-label="View mode">
+          <button type="button" @click="setView('grid')"
+                  :class="view === 'grid' ? 'is-active' : ''"
+                  role="tab" :aria-selected="view === 'grid'"
+                  aria-label="Grid view">
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+              <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+            </svg>
+          </button>
+          <button type="button" @click="setView('list')"
+                  :class="view === 'list' ? 'is-active' : ''"
+                  role="tab" :aria-selected="view === 'list'"
+                  aria-label="List view">
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+          </button>
+        </div>
+
+        {# Sort dropdown. Options written out statically because the HTML
+           parser disallows non-<option> children inside <select>. #}
         <select id="sort-select" class="input select py-1.5 pr-8 pl-3 text-sm w-auto"
                 :value="sort"
-                @change="sort = $event.target.value; onFilterChange()">
+                @change="sort = $event.target.value; onFilterChange()"
+                aria-label="Sort results">
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
           <option value="salary_high">Salary: high → low</option>
@@ -161,23 +190,26 @@
       </div>
     </div>
 
-    {# Active filter chips #}
-    <div class="flex flex-wrap items-center gap-2" x-show="activeChips().length">
-      <template x-for="chip in activeChips()" :key="chip.label">
-        <button type="button" class="badge" @click="removeChip(chip)">
-          <span x-text="chip.label"></span>
-          <svg class="h-3 w-3 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
-        </button>
-      </template>
+    {# ---- Active filter chips ---- #}
+    <div x-show="activeChips().length" class="active-chips">
+      <span class="text-xs text-text-subtle uppercase tracking-wider font-medium shrink-0">Active</span>
+      <div class="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
+        <template x-for="chip in activeChips()" :key="chip.label">
+          <button type="button" class="chip-removable" @click="removeChip(chip)">
+            <span x-text="chip.label"></span>
+            <svg class="h-3 w-3 opacity-60 group-hover:opacity-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </template>
+      </div>
       <button type="button"
-              class="text-xs text-text-muted underline-offset-2 hover:underline hover:text-text"
+              class="text-xs text-text-muted hover:text-accent transition-colors shrink-0 font-medium"
               @click="clearAll()">
-        clear all
+        Clear all
       </button>
     </div>
 
-    {# Error state #}
-    <div x-show="error" class="toast">
+    {# ---- Error state ---- #}
+    <div x-show="error" class="toast border-danger/30">
       <div class="flex items-start gap-3">
         <svg class="h-4 w-4 text-danger shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01" stroke-linecap="round"/></svg>
         <div class="flex-1 text-sm">
@@ -187,7 +219,7 @@
       </div>
     </div>
 
-    {# Loading skeletons — first paint #}
+    {# ---- Loading skeletons — first paint ---- #}
     <div x-show="isLoading && jobs.length === 0"
          class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
       {% for _ in range(6) %}
@@ -195,120 +227,219 @@
       {% endfor %}
     </div>
 
-    {# Result grid #}
-    <div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4"
-         x-show="!isLoading || jobs.length > 0">
-      <template x-for="job in jobs" :key="job.id">
+    {# ============================================================
+       Result GRID — `view` lives on the dashboard() scope above.
+    ================================================================= #}
+    <div x-show="!isLoading || jobs.length > 0"
+         class="space-y-3">
 
-        <article class="card card-interactive relative flex flex-col">
-          <div class="p-4 space-y-3 flex-1 flex flex-col">
-            {# title + company. The anchor's ::before is stretched to fill
-               the article so clicks anywhere on the card navigate to the
-               detail page. Apply/Save sit above this via z-index. #}
-            <div class="space-y-1 pr-8">
-              <div class="flex items-start gap-2">
-                <template x-if="isFresh(job)">
-                  <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
-                        title="Posted in the last 24h"
-                        aria-label="Fresh"></span>
-                </template>
-                <h3 class="font-semibold text-text leading-snug line-clamp-2 text-pretty">
-                  <a :href="'/job/' + job.id"
-                     class="hover:text-accent before:absolute before:inset-0 before:content-['']"
-                     x-text="job.title || 'Untitled'"></a>
-                </h3>
+      {# ---- Grid view ---- #}
+      <div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4"
+           x-show="view === 'grid'">
+        <template x-for="job in jobs" :key="job.id">
+          <article class="job-card group" :class="job.is_saved ? 'is-saved' : ''">
+            <div class="job-card-inner">
+
+              {# title row — company tile + title + save button #}
+              <div class="flex items-start gap-3">
+                <div class="job-tile shrink-0"
+                     x-text="(job.company || '?').charAt(0).toUpperCase()"
+                     :title="job.company || 'Unknown'"></div>
+                <div class="min-w-0 flex-1 pr-8">
+                  <div class="flex items-start gap-1.5">
+                    <template x-if="isFresh(job)">
+                      <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
+                            title="Posted in the last 24h"
+                            aria-label="Fresh"></span>
+                    </template>
+                    <h3 class="font-semibold text-text leading-snug line-clamp-2 text-pretty">
+                      <a :href="'/job/' + job.id"
+                         class="hover:text-accent before:absolute before:inset-0 before:content-['']"
+                         x-text="job.title || 'Untitled'"></a>
+                    </h3>
+                  </div>
+                  <p class="text-sm text-text-muted truncate mt-0.5" x-text="job.company || '—'"></p>
+                </div>
+
+                {# save button — z-10 so it sits above the stretched-link
+                   pseudo-element and intercepts its own clicks. #}
+                <button type="button"
+                        class="job-save"
+                        :class="job.is_saved ? 'is-active' : ''"
+                        @click.stop.prevent="toggleSave(job)"
+                        :title="job.is_saved ? 'Remove from saved' : 'Save for later'"
+                        :aria-label="job.is_saved ? 'Unsave' : 'Save'"
+                        :aria-pressed="job.is_saved">
+                  <template x-if="!job.is_saved">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+                    </svg>
+                  </template>
+                  <template x-if="job.is_saved">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+                  </template>
+                </button>
               </div>
-              <p class="text-sm text-text-muted truncate" x-text="job.company || '—'"></p>
-            </div>
 
-            {# meta row #}
-            <div class="flex flex-wrap items-center gap-1.5 text-xs">
-              <span class="text-text-muted truncate" x-text="formatLocation(job)"></span>
-              <template x-if="job.is_remote">
-                <span class="badge badge-success">Remote</span>
-              </template>
-              <template x-if="job.ats_type">
-                <span class="badge" x-text="facetLabel('ats', job.ats_type)"></span>
-              </template>
-              <template x-if="job.employment_type">
-                <span class="badge" x-text="facetLabel('employment_type', job.employment_type)"></span>
-              </template>
-            </div>
+              {# meta chips row #}
+              <div class="flex flex-wrap items-center gap-1.5 text-xs">
+                <span class="text-text-muted truncate" x-text="formatLocation(job)"></span>
+                <template x-if="job.is_remote">
+                  <span class="badge badge-success">Remote</span>
+                </template>
+                <template x-if="job.ats_type">
+                  <span class="badge" x-text="facetLabel('ats', job.ats_type)"></span>
+                </template>
+                <template x-if="job.employment_type">
+                  <span class="badge" x-text="facetLabel('employment_type', job.employment_type)"></span>
+                </template>
+              </div>
 
-            {# bottom row: salary/dept | time-ago + Apply (inline) #}
-            <div class="mt-auto flex items-center justify-between gap-2 pt-2 border-t border-border-base">
-              <span class="min-w-0 truncate"
-                    :class="cardPrimaryMeta(job).kind === 'salary'
-                            ? 'font-mono tabular text-sm text-text'
-                            : (cardPrimaryMeta(job).kind === 'department'
-                                ? 'text-sm text-text-muted'
-                                : 'text-sm text-text-subtle italic')"
-                    x-text="cardPrimaryMeta(job).text"></span>
+              {# bottom row — salary/dept | age + Apply #}
+              <div class="job-card-foot">
+                <span class="min-w-0 truncate"
+                      :class="cardPrimaryMeta(job).kind === 'salary'
+                              ? 'font-mono tabular text-sm text-text'
+                              : (cardPrimaryMeta(job).kind === 'department'
+                                  ? 'text-sm text-text-muted'
+                                  : 'text-sm text-text-subtle italic')"
+                      x-text="cardPrimaryMeta(job).text"></span>
+                <div class="flex items-center gap-2 shrink-0">
+                  <span class="job-age tabular" x-text="formatTimeLabel(job)"></span>
+                  <template x-if="job.apply_url || job.url">
+                    <a :href="job.apply_url || job.url"
+                       target="_blank"
+                       rel="noopener noreferrer"
+                       @click.stop
+                       class="job-apply"
+                       title="Open the application page in a new tab"
+                       aria-label="Apply to this job">
+                      Apply
+                      <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                           stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M7 17 17 7M9 7h8v8"/>
+                      </svg>
+                    </a>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </article>
+        </template>
+      </div>
+
+      {# ---- List view ---- #}
+      <div x-show="view === 'list'" class="job-list">
+        <template x-for="job in jobs" :key="job.id">
+          <article class="job-row group" :class="job.is_saved ? 'is-saved' : ''">
+            <div class="job-tile shrink-0"
+                 x-text="(job.company || '?').charAt(0).toUpperCase()"></div>
+
+            <div class="min-w-0 flex-1 flex flex-col sm:flex-row sm:items-center gap-y-1 sm:gap-4">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1.5">
+                  <template x-if="isFresh(job)">
+                    <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" title="Posted in the last 24h"></span>
+                  </template>
+                  <h3 class="font-semibold text-text truncate">
+                    <a :href="'/job/' + job.id"
+                       class="hover:text-accent before:absolute before:inset-0 before:content-['']"
+                       x-text="job.title || 'Untitled'"></a>
+                  </h3>
+                </div>
+                <p class="text-xs text-text-muted truncate mt-0.5">
+                  <span x-text="job.company || '—'"></span>
+                  <span class="text-text-subtle px-1">·</span>
+                  <span x-text="formatLocation(job)"></span>
+                </p>
+              </div>
+
+              <div class="hidden md:flex items-center gap-1.5 shrink-0">
+                <template x-if="job.is_remote">
+                  <span class="badge badge-success">Remote</span>
+                </template>
+                <template x-if="job.ats_type">
+                  <span class="badge" x-text="facetLabel('ats', job.ats_type)"></span>
+                </template>
+              </div>
+
+              <div class="hidden lg:block min-w-0 max-w-[14rem] shrink-0">
+                <span class="block truncate"
+                      :class="cardPrimaryMeta(job).kind === 'salary'
+                              ? 'font-mono tabular text-sm text-text'
+                              : 'text-sm text-text-subtle'"
+                      x-text="cardPrimaryMeta(job).text"></span>
+              </div>
+
               <div class="flex items-center gap-2 shrink-0">
-                <span class="text-xs text-text-subtle" x-text="formatTimeLabel(job)"></span>
+                <span class="job-age tabular" x-text="formatTimeLabel(job)"></span>
                 <template x-if="job.apply_url || job.url">
                   <a :href="job.apply_url || job.url"
                      target="_blank"
                      rel="noopener noreferrer"
                      @click.stop
-                     class="relative z-10 inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-sm bg-accent/10 text-accent border border-accent/20 hover:bg-accent hover:text-accent-fg hover:border-accent transition-colors"
-                     title="Open the application page in a new tab"
+                     class="job-apply"
                      aria-label="Apply to this job">
                     Apply
-                    <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                         stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M7 17 17 7M9 7h8v8"/>
-                    </svg>
                   </a>
                 </template>
+                <button type="button"
+                        class="job-save"
+                        :class="job.is_saved ? 'is-active' : ''"
+                        @click.stop.prevent="toggleSave(job)"
+                        :aria-label="job.is_saved ? 'Unsave' : 'Save'"
+                        :aria-pressed="job.is_saved">
+                  <template x-if="!job.is_saved">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+                    </svg>
+                  </template>
+                  <template x-if="job.is_saved">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+                  </template>
+                </button>
               </div>
             </div>
-          </div>
-
-          {# save button — z-10 so it sits above the title's stretched-link
-             pseudo-element and intercepts clicks meant for it. #}
-          <button type="button"
-                  class="absolute top-3 right-3 z-10 grid h-7 w-7 place-items-center rounded-sm text-text-subtle hover:bg-surface-muted hover:text-text"
-                  :class="{ 'text-accent': job.is_saved }"
-                  @click.stop.prevent="toggleSave(job)"
-                  :title="job.is_saved ? 'Remove from saved' : 'Save for later'"
-                  :aria-label="job.is_saved ? 'Unsave' : 'Save'">
-            <template x-if="!job.is_saved">
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
-              </svg>
-            </template>
-            <template x-if="job.is_saved">
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
-            </template>
-          </button>
-        </article>
-      </template>
+          </article>
+        </template>
+      </div>
     </div>
 
-    {# Empty state #}
+    {# ---- Empty state ---- #}
     <div x-show="!isLoading && jobs.length === 0 && !error"
-         class="card p-12 text-center space-y-3">
-      <div class="mx-auto grid h-10 w-10 place-items-center rounded-full bg-surface-muted">
-        <svg class="h-5 w-5 text-text-subtle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+         class="empty-state">
+      <div class="empty-state-blob" aria-hidden="true"></div>
+      <div class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-accent/10 text-accent">
+        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
       </div>
-      <div class="space-y-1">
-        <h3 class="font-semibold text-text">No jobs match these filters</h3>
-        <p class="text-text-muted text-sm">Try removing a filter or widening the time window.</p>
+      <div class="space-y-1 max-w-md mx-auto">
+        <h3 class="text-lg font-semibold text-text tracking-tight">No jobs match these filters</h3>
+        <p class="text-text-muted text-sm text-pretty">
+          Try widening the time window, dropping a country, or clearing
+          your role chips. The data refreshes every 24 hours.
+        </p>
       </div>
-      <button type="button" class="btn btn-secondary btn-sm mx-auto" @click="clearAll()">
-        Clear all filters
-      </button>
+      <div class="flex flex-wrap items-center justify-center gap-2 pt-2">
+        <button type="button" class="btn btn-secondary btn-sm" @click="clearAll()">
+          Clear all filters
+        </button>
+        <button type="button" class="btn btn-ghost btn-sm"
+                @click="filters.posted_hours = 720; onFilterChange()">
+          Widen to last 30 days
+        </button>
+      </div>
     </div>
 
-    {# Infinite scroll sentinel + loading-more spinner #}
+    {# ---- Infinite scroll sentinel + loading-more spinner ---- #}
     <div class="py-6 text-center">
       <div x-show="isLoadingMore" class="inline-flex items-center gap-2 text-sm text-text-muted">
         <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" stroke-linecap="round"/></svg>
         Loading more…
       </div>
       <p x-show="!isLoadingMore && !hasMore && jobs.length > 0" class="text-sm text-text-subtle">
-        End of results · <span class="tabular" x-text="jobs.length.toLocaleString()"></span> shown
+        <span class="inline-block h-px w-8 bg-border-base align-middle mr-2"></span>
+        End of results · <span class="tabular text-text" x-text="jobs.length.toLocaleString()"></span> shown
+        <span class="inline-block h-px w-8 bg-border-base align-middle ml-2"></span>
       </p>
       <div x-ref="sentinel" class="h-1"></div>
     </div>

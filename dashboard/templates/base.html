@@ -52,7 +52,7 @@
   <header class="sticky top-0 z-30 border-b border-border-base/70 bg-bg/70 backdrop-blur-xl">
     <div class="mx-auto flex h-14 max-w-screen-2xl items-center gap-3 px-4 lg:px-6">
 
-      <a href="/" class="flex items-center gap-2 font-semibold tracking-tight shrink-0">
+      <a href="/dashboard" class="flex items-center gap-2 font-semibold tracking-tight shrink-0">
         <span class="grid h-7 w-7 place-items-center rounded-base bg-accent text-accent-fg text-sm font-bold">a</span>
         <span class="hidden sm:inline">applyd</span>
       </a>
@@ -133,6 +133,20 @@
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
         </svg>
         </button>
+
+        <form method="post" action="{{ request.state.identity_service_url }}/logout" class="inline-flex">
+          <input type="hidden" name="csrf_token" value="{{ request.cookies.get('applyd_csrf', '') }}">
+          <button type="submit"
+                  class="btn btn-ghost btn-icon"
+                  title="Sign out"
+                  aria-label="Sign out">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+              <polyline points="16 17 21 12 16 7"/>
+              <line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+          </button>
+        </form>
       </div>
 
     </div>

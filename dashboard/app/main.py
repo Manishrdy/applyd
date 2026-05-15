@@ -9,18 +9,21 @@ from __future__ import annotations
 import logging
 import time
 from contextlib import asynccontextmanager
+from urllib.parse import quote
 
+import httpx
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
-from app.database import get_db, init_db
+from app.database import cached_jobs_total, get_db, init_db
 from app.logging_config import (
     configure_logging,
     log_http_request,
@@ -122,6 +125,58 @@ async def logging_middleware(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    public_prefixes = (
+        "/static/",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+        "/api/health",
+    )
+    protected_prefixes = (
+        "/dashboard",
+        "/saved",
+        "/stats",
+        "/settings",
+        "/scrape",
+        "/job/",
+        "/api/",
+    )
+    if path == "/api/health":
+        return await call_next(request)
+    is_public = path == "/" or path.startswith(public_prefixes)
+    if is_public:
+        return await call_next(request)
+    if path.startswith(protected_prefixes):
+        token = request.cookies.get("applyd_session")
+        authenticated = False
+        if token:
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    verify = await client.get(
+                        f"{settings.identity_service_url}/api/auth/verify",
+                        cookies={"applyd_session": token},
+                    )
+                authenticated = verify.status_code == 200
+            except Exception:
+                authenticated = False
+        if not authenticated:
+            if path.startswith("/api/"):
+                return JSONResponse({"detail": "authentication required"}, status_code=401)
+            target = str(request.url)
+            signin_url = f"{settings.identity_service_url}/signin?next={quote(target, safe='')}"
+            return RedirectResponse(url=signin_url, status_code=303)
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def bind_identity_service_url(request: Request, call_next):
+    request.state.identity_service_url = settings.identity_service_url.rstrip("/")
+    return await call_next(request)
+
+
 # ---- error handlers ------------------------------------------------------
 # Themed 404/500 for HTML routes; JSON keeps the FastAPI default for /api/*.
 
@@ -165,8 +220,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 @app.get("/api/health", tags=["meta"])
 def health() -> dict:
+    total = cached_jobs_total()
     with get_db() as conn:
-        total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         last = conn.execute(
             "SELECT fetched_at, status, manifest_updated_at "
             "FROM manifest_log WHERE status='success' "

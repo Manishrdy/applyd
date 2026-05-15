@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
+import threading
+import time
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
 from app.config import settings
+
+log = logging.getLogger(__name__)
 
 
 SCHEMA_SQL = """
@@ -227,6 +233,7 @@ CREATE TABLE IF NOT EXISTS app_maintenance (
     value       TEXT,
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
 """
 
 
@@ -291,6 +298,154 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         "key TEXT PRIMARY KEY, value TEXT, "
         "updated_at TEXT NOT NULL DEFAULT (datetime('now')))"
     )
+
+
+def db_reclaimable_bytes(conn: sqlite3.Connection | None = None) -> int:
+    """Bytes currently held by free pages — what VACUUM would return to disk."""
+    if conn is not None:
+        page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
+        free = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+        return page_size * free
+    with get_db() as c:
+        return db_reclaimable_bytes(c)
+
+
+def last_vacuum_at() -> datetime | None:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_maintenance WHERE key='last_vacuum_at'"
+        ).fetchone()
+    if row is None or not row["value"]:
+        return None
+    try:
+        return datetime.fromisoformat(str(row["value"])).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def vacuum_db(path: Path | None = None) -> dict:
+    """Run VACUUM and record the timestamp. Returns before/after sizes."""
+    p = Path(path) if path else settings.db_path
+    size_before = p.stat().st_size if p.exists() else 0
+    started = time.perf_counter()
+    with get_db(path) as conn:
+        page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
+        free_before = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.execute("VACUUM")
+        free_after = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+        now_iso = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "INSERT INTO app_maintenance(key, value, updated_at) "
+            "VALUES('last_vacuum_at', ?, datetime('now')) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')",
+            (now_iso,),
+        )
+    elapsed = time.perf_counter() - started
+    size_after = p.stat().st_size if p.exists() else 0
+    return {
+        "size_before_bytes": size_before,
+        "size_after_bytes": size_after,
+        "reclaimed_bytes": max(0, size_before - size_after),
+        "free_pages_before": free_before,
+        "free_pages_after": free_after,
+        "page_size": page_size,
+        "duration_seconds": elapsed,
+        "last_vacuum_at": now_iso,
+    }
+
+
+# Startup floor: don't pay the multi-minute VACUUM cost unless there's a
+# meaningful amount to reclaim. Manual /api/settings/vacuum bypasses this.
+STARTUP_VACUUM_MIN_BYTES = 100 * 1024 * 1024  # 100 MB
+
+
+def vacuum_if_needed(min_reclaim_bytes: int = STARTUP_VACUUM_MIN_BYTES) -> dict | None:
+    """Run VACUUM on startup iff cadence elapsed AND reclaimable >= threshold."""
+    if not settings.db_vacuum_enabled:
+        return None
+    last = last_vacuum_at()
+    min_hours = max(1, int(settings.db_vacuum_min_interval_hours))
+    if last is not None:
+        elapsed_h = (datetime.now(timezone.utc) - last).total_seconds() / 3600
+        if elapsed_h < min_hours:
+            return None
+    reclaimable = db_reclaimable_bytes()
+    if reclaimable < max(0, int(min_reclaim_bytes)):
+        return None
+    log.info(
+        "startup VACUUM: ~%.1f MB reclaimable, running…",
+        reclaimable / (1024 * 1024),
+    )
+    return vacuum_db()
+
+
+# ---- jobs_total cache -----------------------------------------------------
+# `SELECT COUNT(*) FROM jobs` is a full b-tree scan on a multi-GB DB and was
+# blocking every dashboard render for 15-20s on a cold OS page cache. We keep
+# a materialized total in app_maintenance (refreshed by ingestion) plus a
+# process-local TTL so hot requests never touch the DB at all.
+
+_JOBS_TOTAL_TTL_SECONDS = 60.0
+_jobs_total_lock = threading.Lock()
+_jobs_total_cache: tuple[int, float] | None = None  # (value, monotonic_expires_at)
+
+
+def _read_jobs_total_marker(conn: sqlite3.Connection) -> int | None:
+    row = conn.execute(
+        "SELECT value FROM app_maintenance WHERE key='jobs_total'"
+    ).fetchone()
+    if row is None or row["value"] is None:
+        return None
+    try:
+        return int(row["value"])
+    except (TypeError, ValueError):
+        return None
+
+
+def _write_jobs_total_marker(conn: sqlite3.Connection, total: int) -> None:
+    conn.execute(
+        "INSERT INTO app_maintenance(key, value, updated_at) "
+        "VALUES('jobs_total', ?, datetime('now')) "
+        "ON CONFLICT(key) DO UPDATE SET "
+        "value=excluded.value, updated_at=datetime('now')",
+        (str(int(total)),),
+    )
+
+
+def _store_jobs_total_cache(total: int) -> None:
+    global _jobs_total_cache
+    with _jobs_total_lock:
+        _jobs_total_cache = (total, time.monotonic() + _JOBS_TOTAL_TTL_SECONDS)
+
+
+def cached_jobs_total() -> int:
+    """Total `jobs` row count, served from a process cache + DB marker.
+
+    Falls back to a one-time COUNT(*) on first call if no marker has ever
+    been written (e.g. a fresh checkout that hasn't ingested yet).
+    """
+    global _jobs_total_cache
+    now = time.monotonic()
+    with _jobs_total_lock:
+        if _jobs_total_cache is not None and _jobs_total_cache[1] > now:
+            return _jobs_total_cache[0]
+
+    with get_db() as conn:
+        total = _read_jobs_total_marker(conn)
+        if total is None:
+            total = int(conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0])
+            _write_jobs_total_marker(conn, total)
+    _store_jobs_total_cache(total)
+    return total
+
+
+def refresh_jobs_total(conn: sqlite3.Connection) -> int:
+    """Recompute COUNT(*), persist the marker, refresh the in-process cache."""
+    total = int(conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0])
+    _write_jobs_total_marker(conn, total)
+    _store_jobs_total_cache(total)
+    return total
 
 
 def rebuild_fts(conn: sqlite3.Connection) -> None:

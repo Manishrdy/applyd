@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     app_port: int = 8000
     debug: bool = False
     log_level: str = "INFO"
+    identity_service_url: str = "http://localhost:8100"
 
     db_path: Path = Path("./data/applyd.db")
     cache_dir: Path = Path("./cache/parquet")

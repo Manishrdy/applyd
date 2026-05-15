@@ -1,0 +1,112 @@
+{# ============================================================
+   Base layout — applyd identity-service
+
+   Blocks subclasses can override:
+     {% block title %}        → page title (suffix " · applyd" added)
+     {% block head %}         → extra <head> content
+     {% block body_attrs %}   → extra attrs on <body>
+     {% block nav_extra %}    → extra controls in the header (rare)
+     {% block main_wrapper %} → full main element override (auth pages use this)
+     {% block main %}         → page body (default container)
+     {% block scripts %}      → end-of-body scripts
+
+   Context vars (from router):
+     active_page: "landing" | "signin" | "signup" (optional)
+================================================================= #}<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="applyd — search every fresh job from 47 ATS platforms, in one place.">
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}{% endblock %} · applyd</title>
+
+  {# FOUC prevention — set theme class BEFORE the stylesheet loads. #}
+  <script nonce="{{ request.state.csp_nonce }}">
+    (function () {
+      try {
+        var stored = localStorage.getItem("applyd:theme");
+        var sys = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        var mode = stored === "dark" || stored === "light" ? stored : sys;
+        if (mode === "dark") document.documentElement.classList.add("dark");
+        document.documentElement.dataset.theme = mode;
+      } catch (e) {}
+    })();
+  </script>
+
+  <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%23111827'/%3E%3Cstop offset='1' stop-color='%234f46e5'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Ctext x='32' y='44' font-family='Inter, sans-serif' font-size='36' font-weight='700' fill='white' text-anchor='middle'%3Ea%3C/text%3E%3C/svg%3E">
+
+  <script defer src="{{ url_for('static', path='js/theme.js') }}"></script>
+
+  {% block head %}{% endblock %}
+</head>
+
+<body class="bg-bg text-text antialiased selection:bg-accent/20 min-h-dvh flex flex-col" {% block body_attrs %}{% endblock %}>
+
+  {# ===== Header ====================================================== #}
+  <header class="sticky top-0 z-30 border-b border-border-base/70 bg-bg/70 backdrop-blur-xl">
+    <div class="mx-auto flex h-14 max-w-screen-2xl items-center justify-between gap-3 px-4 lg:px-6">
+
+      <a href="/" class="flex items-center gap-2 font-semibold tracking-tight shrink-0">
+        <span class="grid h-7 w-7 place-items-center rounded-base bg-accent text-accent-fg text-sm font-bold">a</span>
+        <span>applyd</span>
+      </a>
+
+      <div class="flex items-center gap-2 shrink-0">
+        {% block nav_extra %}{% endblock %}
+
+        {% if active_page != 'signin' %}
+        <a class="btn btn-ghost btn-sm" href="/signin">Sign in</a>
+        {% endif %}
+        {% if active_page != 'signup' %}
+        <a class="btn btn-primary btn-sm" href="/signup">Create account</a>
+        {% endif %}
+
+        {# Theme toggle — mirrors dashboard. #}
+        <button type="button"
+                class="btn btn-ghost btn-icon"
+                onclick="window.applydTheme.toggle()"
+                aria-label="Toggle theme">
+          <svg class="h-4 w-4 hidden dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+          </svg>
+          <svg class="h-4 w-4 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  {# ===== Main ========================================================
+     Two patterns:
+       1. Default container (landing, marketing): override {% block main %}.
+       2. Full-bleed (auth pages): override {% block main_wrapper %}.
+  ==================================================================== #}
+  {% block main_wrapper %}
+  <main class="flex-1 mx-auto w-full max-w-screen-2xl px-4 lg:px-6 py-10 lg:py-14">
+    {% block main %}{% endblock %}
+  </main>
+  {% endblock %}
+
+  {# ===== Footer ====================================================== #}
+  <footer class="border-t border-border-base/70">
+    <div class="mx-auto max-w-screen-2xl px-4 lg:px-6 py-6 text-xs text-text-subtle flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
+      <div>
+        applyd · powered by the open
+        <a href="https://data.stapply.ai/" target="_blank" rel="noopener"
+           class="underline decoration-dotted underline-offset-2 hover:text-text">jobhive</a>
+        dataset (MIT)
+      </div>
+      <div class="flex items-center gap-4">
+        <a href="/" class="hover:text-text">Home</a>
+        <a href="http://localhost:8000/dashboard" class="hover:text-text">Dashboard</a>
+      </div>
+    </div>
+  </footer>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>
