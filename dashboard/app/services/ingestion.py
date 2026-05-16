@@ -415,12 +415,20 @@ _UPSERT_COLUMNS = JOB_COLUMNS + [
 _UPDATE_SET = ",\n    ".join(
     f"{c}=excluded.{c}" for c in _UPSERT_COLUMNS if c != "url"
 )
+# UPSERT bumps last_seen_in_manifest_at AND resets missed_ingest_cycles to 0
+# so a job that re-appears upstream is immediately considered fresh again.
+# verification_status is NOT touched here — a manifest re-appearance alone
+# doesn't auto-reactivate an 'expired' row; reactivation is handled
+# explicitly in job_lifecycle.on_manifest_reappear after 2 consecutive
+# clean cycles (prevents flapping).
 UPSERT_SQL = f"""
 INSERT INTO jobs ({', '.join(_UPSERT_COLUMNS)})
 VALUES ({', '.join(['?'] * len(_UPSERT_COLUMNS))})
 ON CONFLICT(url) DO UPDATE SET
     {_UPDATE_SET},
-    updated_at=datetime('now')
+    updated_at=datetime('now'),
+    last_seen_in_manifest_at=datetime('now'),
+    missed_ingest_cycles=0
 """
 
 _HTML_BLOCK_RE = re.compile(r"</?(p|div|br|li|tr|h[1-6])[^>]*>", re.IGNORECASE)
@@ -602,6 +610,12 @@ def _row_to_tuple(row: dict, ats_default: str, fetched_cycle: str) -> tuple:
     if description is not None:
         description = strip_html(description)
 
+    posted_at = _to_iso(row.get("posted_at"))
+    if posted_at is None or not str(posted_at).strip():
+        # Upstream snapshots can omit posted_at for some ATS sources.
+        # Stamp ingest-time UTC so date filtering/sorting stays consistent.
+        posted_at = datetime.now(timezone.utc).isoformat()
+
     return (
         _to_str(row.get("url")),
         _to_str(row.get("title")),
@@ -619,7 +633,7 @@ def _row_to_tuple(row: dict, ats_default: str, fetched_cycle: str) -> tuple:
         _to_str(row.get("department")),
         _to_str(row.get("team")),
         description,
-        _to_iso(row.get("posted_at")),
+        posted_at,
         _to_str(row.get("requisition_id")),
         _to_str(row.get("apply_url")),
         _to_str(row.get("commitment")),
@@ -659,15 +673,27 @@ def process_parquet(
         total_seen += len(df)
 
         ts = pd.to_datetime(df["posted_at"], errors="coerce", utc=True)
+        now_utc = pd.Timestamp.now(tz="UTC")
+        future_grace_cutoff = now_utc + pd.Timedelta(hours=24)
         # Keep rows posted within the rolling window, AND undated rows
         # (NULL posted_at). Many ATS sources — Workday, SuccessFactors,
         # Google, Meta, Tesla, TikTok — don't expose post date. We treat
-        # those as "currently active" (the upstream is a live snapshot) and
-        # prune them via fetched_cycle staleness instead.
+        # those as "currently active" (the upstream is a live snapshot).
         mask = ts.isna() | (ts >= cutoff_ts)
         df = df.loc[mask]
         if df.empty:
             continue
+
+        # Normalize unreliable upstream timestamps:
+        # - missing posted_at -> ingest-time UTC
+        # - materially future-dated (>24h ahead) -> ingest-time UTC
+        #
+        # Using ingest-time keeps query windows and retention behavior sane
+        # without hiding rows for months/years due to bad upstream dates.
+        ts = pd.to_datetime(df["posted_at"], errors="coerce", utc=True)
+        fix_mask = ts.isna() | (ts > future_grace_cutoff)
+        if fix_mask.any():
+            df.loc[fix_mask, "posted_at"] = now_utc
 
         df = df[df["url"].notna() & (df["url"].astype(str).str.len() > 0)]
         if df.empty:
@@ -703,14 +729,62 @@ def process_parquet(
 
 
 def prune_old(conn: sqlite3.Connection, days: int, current_cycle: str) -> int:
-    """Drop any row whose effective date (COALESCE(posted_at, first_seen_at))
-    is older than the rolling window. This handles dated and undated rows
-    uniformly: dated rows age out by upstream timestamp; undated rows age out
-    relative to when we first observed them.
+    """Drop stale rows under one of two rules:
+
+      1. **Effective-date prune** (the original behavior): rows whose
+         COALESCE(posted_at, first_seen_at) fall outside the rolling window.
+
+      2. **Expired-job prune**: rows marked verification_status='expired'
+         whose verification_status_at is older than 30 days. Soft-hidden
+         expired jobs survive long enough to power the "No longer accepting
+         applications" filter category, then get hard-deleted.
+
+    Both branches cascade-delete saved_jobs entries (FK ON DELETE CASCADE).
     """
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    eff_cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    expired_cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
     cur = conn.execute(
-        "DELETE FROM jobs WHERE COALESCE(posted_at, first_seen_at) < ?",
+        "DELETE FROM jobs WHERE "
+        "  (verification_status = 'expired' AND verification_status_at < ?) "
+        "  OR (verification_status != 'expired' "
+        "      AND COALESCE(posted_at, first_seen_at) < ?)",
+        (expired_cutoff, eff_cutoff),
+    )
+    return cur.rowcount
+
+
+def mark_manifest_drops(
+    conn: sqlite3.Connection, cycle_start_iso: str
+) -> int:
+    """After a successful ingest, increment missed_ingest_cycles for every
+    row that wasn't UPSERTed in this cycle.
+
+    Touched rows have last_seen_in_manifest_at >= cycle_start_iso (the UPSERT
+    bumps it to datetime('now') and resets the counter). Untouched rows
+    keep an older timestamp and get the counter bumped.
+
+    Only called from run_ingestion AFTER a successful (status='success')
+    cycle — never from a skipped cycle (manifest unchanged), so the counter
+    measures "successful cycles where this URL did NOT appear" rather than
+    wall-clock days.
+    """
+    cur = conn.execute(
+        "UPDATE jobs SET missed_ingest_cycles = missed_ingest_cycles + 1 "
+        "WHERE COALESCE(last_seen_in_manifest_at, '') < ?",
+        (cycle_start_iso,),
+    )
+    return cur.rowcount
+
+
+VERIFICATION_LOG_TTL_DAYS = 90
+
+
+def prune_verification_log(conn: sqlite3.Connection) -> int:
+    """TTL prune of job_verification_log. Keeps audit cheap; the lifecycle
+    state lives on jobs.verification_status, not here."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=VERIFICATION_LOG_TTL_DAYS)).isoformat()
+    cur = conn.execute(
+        "DELETE FROM job_verification_log WHERE checked_at < ?",
         (cutoff,),
     )
     return cur.rowcount
@@ -786,6 +860,10 @@ async def run_ingestion(
     t0 = time.time()
     fetched_at = datetime.now(timezone.utc).isoformat()
     fetched_cycle = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # cycle_start_iso anchors the missed_ingest_cycles increment: any row
+    # whose last_seen_in_manifest_at is older than this didn't get touched
+    # by this cycle's UPSERTs (which stamp datetime('now')).
+    cycle_start_iso = fetched_at
     cutoff_ts = pd.Timestamp(
         datetime.now(timezone.utc) - timedelta(days=settings.rolling_window_days)
     )
@@ -860,7 +938,18 @@ async def run_ingestion(
                     per_ats[ats] = {"status": "failed", "error": str(e), "seen": 0, "upserted": 0}
 
             rows_pruned = prune_old(conn, settings.rolling_window_days, fetched_cycle)
-            log.info("pruned %d rows (old-dated + stale-undated)", rows_pruned)
+            log.info("pruned %d rows (old-dated + stale-undated + expired)", rows_pruned)
+
+            # Increment missed_ingest_cycles for jobs that didn't appear in
+            # this successful cycle. Drives the manifest-drop signal in
+            # job_lifecycle (>=2 misses → suspected).
+            drops_marked = mark_manifest_drops(conn, cycle_start_iso)
+            if drops_marked:
+                log.info("missed_ingest_cycles incremented on %d rows", drops_marked)
+
+            vlog_pruned = prune_verification_log(conn)
+            if vlog_pruned:
+                log.info("pruned %d verification log rows (TTL)", vlog_pruned)
 
             log.info("rebuilding FTS5 index")
             rebuild_fts(conn)

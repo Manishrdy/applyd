@@ -97,6 +97,49 @@ class Settings(BaseSettings):
     # One-time import source for legacy identity DB into applyd.db.
     identity_legacy_db_path: Path = Path("./data/legacy/identity.db")
 
+    # --- Expired-job detection lifecycle ----------------------------------
+    # Global kill switch. When False, no lifecycle transitions happen at all:
+    # reports are still accepted (so user signal isn't lost), but the
+    # state machine doesn't promote anything.
+    expired_detection_enabled: bool = True
+    # When False, the lifecycle records signals and the verifier writes to
+    # job_verification_log, but no jobs.verification_status='expired' writes
+    # happen. Stays False for the first ~2 weeks in production so we can
+    # eyeball matcher false-positive rates before auto-hiding anything.
+    verifier_auto_marking_enabled: bool = False
+    # How often to re-check every active job. With ~500k active corpus over
+    # 1 day that's ~6 req/sec globally; bump to 3 or 5 if per-host rate-limits
+    # start firing. 1 day default = every job hit every day.
+    verifier_sweep_days: int = 1
+    # When True (default), the periodic sweep does NOT filter by
+    # last_verified_at — it picks the oldest-checked jobs first and walks
+    # the entire active corpus continuously. Set False to fall back to
+    # "only check jobs older than verifier_sweep_days."
+    verifier_sweep_all_active: bool = True
+    # Per-host concurrency cap for the verifier. Mirrors download_concurrency.
+    verifier_per_host_concurrency: int = 4
+    # Global concurrency cap across all hosts.
+    verifier_global_concurrency: int = 16
+    # HTTP timeout for a single verifier check.
+    verifier_request_timeout_seconds: int = 20
+    # Suspected pool drain cadence (event-driven verifications).
+    verifier_suspected_interval_minutes: int = 5
+    # Periodic sweep tick cadence. Lower = more frequent, smaller batches
+    # → more visible activity in the UI. Sweep batch size is auto-computed
+    # so the full active corpus is still covered every verifier_sweep_days.
+    verifier_sweep_interval_minutes: int = 10
+    # Max suspected jobs verified per drain tick.
+    verifier_suspected_batch: int = 50
+    # Periodic-sweep batch size per hour (auto-computed by default: corpus /
+    # (sweep_days * 24)). Override here to clamp manually.
+    verifier_sweep_batch_size: int | None = None
+    # Circuit breaker: if a single ATS produces >this many auto-expirations
+    # in one hour bucket, halt 'expired' writes for that ATS.
+    verifier_circuit_breaker_threshold: int = 25
+    # Per-user report rate limits.
+    report_rate_limit_per_day: int = 20
+    report_rate_limit_per_company_per_week: int = 5
+
 
 settings = Settings()
 settings.db_path.parent.mkdir(parents=True, exist_ok=True)

@@ -14,11 +14,23 @@ from app.config import settings
 from app.database import get_db
 from app.services.ingestion import run_ingestion
 from app.services.manifest import latest_manifest_log
+from app.services import verifier as verifier_svc
 
 log = logging.getLogger(__name__)
 
 _scheduler: AsyncIOScheduler | None = None
 _ingest_lock: asyncio.Lock | None = None
+# Separate lock for the verifier so a long-running ingest never blocks
+# expiration checks (and vice versa). SQLite WAL handles concurrent reads
+# + one writer; busy_timeout absorbs short contention.
+_verify_lock: asyncio.Lock | None = None
+
+
+def _get_verify_lock() -> asyncio.Lock:
+    global _verify_lock
+    if _verify_lock is None:
+        _verify_lock = asyncio.Lock()
+    return _verify_lock
 
 
 def _utc_day_bounds_iso(day: date) -> tuple[str, str]:
@@ -112,8 +124,46 @@ async def _run_daily() -> None:
         async with _get_ingest_lock():
             result = await run_ingestion()
         log.info("daily ingestion: %s", result.get("status"))
+        if result.get("status") == "success" and settings.expired_detection_enabled:
+            # After every successful ingest, sweep jobs that have just
+            # become eligible (missed_ingest_cycles >= 2) so the manifest
+            # drop signal turns into a verifier check the same day.
+            try:
+                async with _get_verify_lock():
+                    drop_result = await verifier_svc.drain_manifest_drops()
+                log.info("post-ingest manifest-drop sweep: %s", drop_result)
+            except Exception:
+                log.exception("post-ingest manifest-drop sweep failed")
     except Exception:
         log.exception("daily ingestion failed")
+
+
+async def _run_verify_suspected() -> None:
+    if not settings.expired_detection_enabled:
+        return
+    lock = _get_verify_lock()
+    if lock.locked():
+        return
+    try:
+        async with lock:
+            result = await verifier_svc.drain_suspected()
+        log.info("suspected verifier tick: %s", result)
+    except Exception:
+        log.exception("suspected verifier tick failed")
+
+
+async def _run_verify_sweep() -> None:
+    if not settings.expired_detection_enabled:
+        return
+    lock = _get_verify_lock()
+    if lock.locked():
+        return
+    try:
+        async with lock:
+            result = await verifier_svc.drain_periodic_sweep()
+        log.info("periodic sweep tick: %s", result)
+    except Exception:
+        log.exception("periodic sweep tick failed")
 
 
 async def _run_if_stale() -> None:
@@ -204,12 +254,33 @@ def start_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
         coalesce=True,
     )
+    if settings.expired_detection_enabled:
+        _scheduler.add_job(
+            _run_verify_suspected,
+            trigger=IntervalTrigger(minutes=settings.verifier_suspected_interval_minutes),
+            id="verify_suspected",
+            replace_existing=True,
+            coalesce=True,
+        )
+        # Periodic sweep ticks every verifier_sweep_interval_minutes (10 by
+        # default). Each tick verifies a batch sized so the entire active
+        # corpus is covered every verifier_sweep_days. With sweep_all_active
+        # = True (default) the query ignores last_verified_at and just walks
+        # the corpus oldest-checked first — every job gets hit.
+        _scheduler.add_job(
+            _run_verify_sweep,
+            trigger=IntervalTrigger(minutes=settings.verifier_sweep_interval_minutes),
+            id="verify_periodic_sweep",
+            replace_existing=True,
+            coalesce=True,
+        )
     _scheduler.start()
     log.info(
-        "scheduler started (daily cron at %02d:00 UTC; catch-up poll every %dm until %02d:59 UTC on skipped days)",
+        "scheduler started (daily cron at %02d:00 UTC; catch-up poll every %dm until %02d:59 UTC on skipped days; verifier %s)",
         settings.ingest_hour_utc,
         settings.ingest_poll_interval_minutes,
         settings.ingest_poll_end_hour_utc,
+        "enabled" if settings.expired_detection_enabled else "disabled",
     )
     return _scheduler
 

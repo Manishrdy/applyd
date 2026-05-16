@@ -48,7 +48,20 @@ CREATE TABLE IF NOT EXISTS jobs (
     -- when upstream `posted_at` is NULL (workday, faang custom APIs, etc.).
     -- Set on INSERT via DEFAULT; preserved by UPSERT (not in DO UPDATE list).
     first_seen_at         TEXT DEFAULT (datetime('now')),
-    updated_at            TEXT DEFAULT (datetime('now'))
+    updated_at            TEXT DEFAULT (datetime('now')),
+    -- Availability lifecycle (see services/job_lifecycle.py). Three states:
+    -- 'active' (default), 'suspected' (one weak signal), 'expired' (two
+    -- signals corroborate or HTTP hard-failure).
+    verification_status     TEXT NOT NULL DEFAULT 'active',
+    verification_status_at  TEXT,
+    last_verified_at        TEXT,
+    -- Bumped on every UPSERT; closing UPDATE after each successful ingest
+    -- increments missed_ingest_cycles for any row whose timestamp is older
+    -- than this cycle's start. Skipped (manifest-unchanged) cycles do NOT
+    -- increment — see app/services/ingestion.py:run_ingestion.
+    last_seen_in_manifest_at TEXT DEFAULT (datetime('now')),
+    missed_ingest_cycles    INTEGER NOT NULL DEFAULT 0,
+    report_count            INTEGER NOT NULL DEFAULT 0
 );
 
 -- effective_date = COALESCE(posted_at, first_seen_at) — used for time-window
@@ -80,6 +93,11 @@ CREATE INDEX IF NOT EXISTS idx_jobs_country_emp_eff   ON jobs(country, employmen
 -- salary_max_usd_annual. Was 1.7s, now 13ms.
 CREATE INDEX IF NOT EXISTS idx_jobs_country_salary    ON jobs(country, salary_max_usd_annual);
 
+-- Partial indexes for the expiry lifecycle live in _migrate_schema(),
+-- not here. SCHEMA_SQL runs BEFORE column migrations; on an existing
+-- DB the new lifecycle columns don't yet exist when this script runs,
+-- so any index referencing them must be created AFTER _ensure_column.
+
 CREATE VIRTUAL TABLE IF NOT EXISTS jobs_fts USING fts5(
     title, company, description, location,
     content='jobs',
@@ -88,13 +106,17 @@ CREATE VIRTUAL TABLE IF NOT EXISTS jobs_fts USING fts5(
 );
 
 CREATE TABLE IF NOT EXISTS saved_jobs (
-    job_id     INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    job_id     INTEGER NOT NULL REFERENCES jobs(id)  ON DELETE CASCADE,
     saved_at   TEXT DEFAULT (datetime('now')),
     notes      TEXT,
-    status     TEXT DEFAULT 'queued'    -- queued | applied | skipped | archived
+    status     TEXT DEFAULT 'queued',    -- queued | applied | skipped | archived
+    PRIMARY KEY (user_id, job_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_saved_status ON saved_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_saved_status         ON saved_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_saved_user_status    ON saved_jobs(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_saved_user_saved_at  ON saved_jobs(user_id, saved_at);
 
 CREATE TABLE IF NOT EXISTS manifest_log (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -252,6 +274,60 @@ CREATE TABLE IF NOT EXISTS admin_audit (
 CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_admin_audit_action  ON admin_audit(action, created_at DESC);
 
+-- User-submitted "this job is broken / expired" reports. One report per
+-- (user, job) — UNIQUE makes POST idempotent. detail capped+stripped at the
+-- API layer. job_id SET NULL on delete so reports survive the 30-day prune
+-- and remain available as abuse-signal.
+CREATE TABLE IF NOT EXISTS job_reports (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    job_id       INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+    reason       TEXT NOT NULL,        -- not_found | position_filled | link_broken | other
+    detail       TEXT,
+    reported_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (user_id, job_id)
+);
+CREATE INDEX IF NOT EXISTS idx_job_reports_job ON job_reports(job_id);
+CREATE INDEX IF NOT EXISTS idx_job_reports_user ON job_reports(user_id, reported_at DESC);
+CREATE INDEX IF NOT EXISTS idx_job_reports_reported_at ON job_reports(reported_at);
+
+-- Append-only log of every automated availability check. Read by admin
+-- /admin/expirations and by the lifecycle service for trail/audit.
+-- TTL pruned to 90 days inside ingestion._maybe_vacuum.
+CREATE TABLE IF NOT EXISTS job_verification_log (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id       INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    checked_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    trigger      TEXT NOT NULL,        -- user_report | manifest_drop | periodic | admin
+    http_status  INTEGER,
+    result       TEXT NOT NULL,        -- active | expired | unknown | error
+    detector     TEXT,
+    detail       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_jvl_job ON job_verification_log(job_id, checked_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jvl_checked ON job_verification_log(checked_at);
+
+-- Per-(ats_type, hour) circuit breaker for the verifier. If the verifier
+-- emits >threshold expirations from one ATS in one hour bucket, halts
+-- 'expired' writes for that ATS until admin manually clears.
+CREATE TABLE IF NOT EXISTS verifier_circuit_breaker (
+    ats_type     TEXT NOT NULL,
+    hour_bucket  TEXT NOT NULL,         -- YYYY-MM-DDTHH (UTC)
+    expire_count INTEGER NOT NULL DEFAULT 0,
+    tripped_at   TEXT,
+    cleared_at   TEXT,
+    cleared_by   INTEGER,
+    PRIMARY KEY (ats_type, hour_bucket)
+);
+
+-- Per-user, per-day action rate limit. Reuses the same shape as
+-- auth_rate_limits but scoped to user-action keys (e.g. "report:<user_id>").
+CREATE TABLE IF NOT EXISTS user_action_rate_limits (
+    bucket_key         TEXT PRIMARY KEY,
+    count              INTEGER NOT NULL,
+    window_started_at  TEXT NOT NULL
+);
+
 """
 
 IDENTITY_SCHEMA_SQL = """
@@ -335,6 +411,7 @@ def get_db(path: Path | None = None) -> Iterator[sqlite3.Connection]:
 def init_db(path: Path | None = None) -> None:
     """Create tables, indexes, and FTS5 virtual table if not present."""
     with get_db(path) as conn:
+        _repair_legacy_saved_jobs(conn)
         conn.executescript(SCHEMA_SQL)
         conn.executescript(IDENTITY_SCHEMA_SQL)
         _migrate_schema(conn)
@@ -352,6 +429,13 @@ def _ensure_column(conn: sqlite3.Connection, table: str, ddl: str) -> None:
     conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
 
 
+def _repair_legacy_saved_jobs(conn: sqlite3.Connection) -> None:
+    """Drop pre-user-scoped saved_jobs so schema indexes can be created."""
+    saved_cols = _table_columns(conn, "saved_jobs")
+    if saved_cols and "user_id" not in saved_cols:
+        conn.execute("DROP TABLE IF EXISTS saved_jobs")
+
+
 def _migrate_schema(conn: sqlite3.Connection) -> None:
     """Lightweight additive migrations for existing local DBs."""
     _ensure_column(conn, "scrape_run", "incremental_enabled INTEGER DEFAULT 0")
@@ -367,6 +451,32 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "scrape_run_ats", "phase_started_at TEXT")
     _ensure_column(conn, "scrape_run_ats", "eta_seconds INTEGER")
     _ensure_column(conn, "scrape_run_ats", "throughput_cpm REAL")
+
+    # Expiry lifecycle columns. CHECK / NOT NULL DEFAULT enforced at write
+    # time; SQLite's ALTER TABLE can't add NOT NULL without a default, so
+    # 'active' / 0 are baked in.
+    _ensure_column(conn, "jobs", "verification_status TEXT NOT NULL DEFAULT 'active'")
+    _ensure_column(conn, "jobs", "verification_status_at TEXT")
+    _ensure_column(conn, "jobs", "last_verified_at TEXT")
+    _ensure_column(conn, "jobs", "last_seen_in_manifest_at TEXT")
+    _ensure_column(conn, "jobs", "missed_ingest_cycles INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "jobs", "report_count INTEGER NOT NULL DEFAULT 0")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_expired ON jobs(id) "
+        "WHERE verification_status = 'expired'"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_suspected ON jobs(verification_status_at) "
+        "WHERE verification_status = 'suspected'"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_drops ON jobs(id) "
+        "WHERE missed_ingest_cycles >= 1"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_verify_due ON jobs(last_verified_at) "
+        "WHERE verification_status = 'active'"
+    )
     conn.execute(
         "CREATE TABLE IF NOT EXISTS app_maintenance ("
         "key TEXT PRIMARY KEY, value TEXT, "
@@ -386,6 +496,25 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE auth_sessions ADD COLUMN public_id TEXT")
         conn.execute("UPDATE auth_sessions SET public_id = lower(hex(randomblob(16))) WHERE public_id IS NULL")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_sessions_public_id ON auth_sessions(public_id)")
+
+    # saved_jobs: scope to user. Old schema had job_id as sole PK; SQLite
+    # cannot ALTER a PK, and existing rows have no recoverable user.
+    saved_cols = _table_columns(conn, "saved_jobs")
+    if "user_id" not in saved_cols:
+        conn.execute("DROP TABLE IF EXISTS saved_jobs")
+        conn.execute(
+            "CREATE TABLE saved_jobs ("
+            "  user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,"
+            "  job_id   INTEGER NOT NULL REFERENCES jobs(id)  ON DELETE CASCADE,"
+            "  saved_at TEXT DEFAULT (datetime('now')),"
+            "  notes    TEXT,"
+            "  status   TEXT DEFAULT 'queued',"
+            "  PRIMARY KEY (user_id, job_id)"
+            ")"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_saved_status        ON saved_jobs(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_saved_user_status   ON saved_jobs(user_id, status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_saved_user_saved_at ON saved_jobs(user_id, saved_at)")
 
 
 def db_reclaimable_bytes(conn: sqlite3.Connection | None = None) -> int:

@@ -12,9 +12,11 @@ from app.admin.routers import (
     backups as backups_router,
     catchall as catchall_router,
     failed_logins as failed_logins_router,
+    job_reports as job_reports_router,
     maintenance as maintenance_router,
     pages as pages_router,
     rate_limits as rate_limits_router,
+    settings as settings_router,
     sessions as sessions_router,
     system as system_router,
 )
@@ -29,7 +31,13 @@ def register_admin(app: FastAPI) -> None:
     app.include_router(backups_router.router, prefix="/api/admin", tags=["admin"])
     app.include_router(audit_router.router, prefix="/api/admin", tags=["admin"])
     app.include_router(system_router.router, prefix="/api/admin", tags=["admin"])
+    app.include_router(job_reports_router.router, prefix="/api/admin", tags=["admin"])
+    app.include_router(settings_router.api_router, prefix="/api/admin", tags=["admin"])
+    # Back-compat shim for cached frontend assets still calling /api/settings/*.
+    # Kept admin-gated via the same dependency guards in settings_router.
+    app.include_router(settings_router.legacy_api_router, prefix="/api/settings", tags=["admin-compat"])
     app.include_router(pages_router.router, tags=["admin-pages"])
+    app.include_router(settings_router.page_router, tags=["admin-pages"])
     # MUST be last. FastAPI matches routes in registration order; the
     # catchall would otherwise eat every more-specific admin path.
     app.include_router(catchall_router.router, tags=["admin-pages"])

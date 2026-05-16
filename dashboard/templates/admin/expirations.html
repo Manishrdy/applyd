@@ -1,0 +1,646 @@
+{% extends "admin/_layout.html" %}
+{% set admin_page_title = "Admin · Expirations" %}
+
+{% block admin_body %}
+<div x-data="adminExpirations()" x-init="init()" x-cloak class="space-y-4">
+
+  <header class="flex items-center justify-between gap-2">
+    <h1 class="text-xl font-semibold tracking-tight">Expirations</h1>
+    <div class="flex items-center gap-2 text-xs">
+      <span class="badge"
+            :class="sse_connected ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'"
+            x-text="sse_connected ? 'LIVE' : 'reconnecting…'"></span>
+      <button type="button" class="btn btn-secondary btn-sm"
+              @click="runSweepNow()" :disabled="running">
+        <span x-show="!running">Run sweep now</span>
+        <span x-show="running">Running…</span>
+      </button>
+    </div>
+  </header>
+
+  <div x-show="error" x-cloak
+       class="card border-danger/40 bg-danger/10 text-danger px-4 py-3 text-sm" x-text="error"></div>
+  <div x-show="info" x-cloak
+       class="card border-accent/40 bg-accent/10 text-accent px-4 py-3 text-sm" x-text="info"></div>
+
+  {# ─── Tabs ─────────────────────────────────────────────────────── #}
+  <div class="border-b border-border-base flex items-center gap-1">
+    <template x-for="t in TABS" :key="t.value">
+      <button type="button"
+              class="px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors"
+              :class="tab === t.value
+                ? 'border-accent text-text'
+                : 'border-transparent text-text-muted hover:text-text'"
+              @click="tab = t.value"
+              x-text="t.label"></button>
+    </template>
+  </div>
+
+  {# ============================================================
+     TAB 1 — LIVE
+  ================================================================= #}
+  <div x-show="tab === 'live'" class="space-y-4">
+
+    {# Schedule + kill switches panel #}
+    <section class="card p-4 space-y-2">
+      <h2 class="text-sm font-semibold">Schedule</h2>
+      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+        <div>
+          <span class="text-text-subtle">Detection: </span>
+          <span class="badge"
+                :class="schedule.expired_detection_enabled ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'"
+                x-text="schedule.expired_detection_enabled ? 'enabled' : 'DISABLED'"></span>
+        </div>
+        <div>
+          <span class="text-text-subtle">Auto-marking: </span>
+          <span class="badge"
+                :class="schedule.verifier_auto_marking_enabled ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'"
+                x-text="schedule.verifier_auto_marking_enabled ? 'on' : 'off (collect-only)'"></span>
+        </div>
+        <div><span class="text-text-subtle">Sweep mode: </span><span x-text="schedule.sweep_all_active ? 'all active jobs' : 'only stale'"></span></div>
+        <div><span class="text-text-subtle">Cadence: </span><span class="tabular" x-text="`every ${schedule.sweep_interval_minutes} min · full pass / ${schedule.sweep_days}d`"></span></div>
+        <div><span class="text-text-subtle">Active corpus: </span><span class="tabular" x-text="(schedule.active_corpus_size ?? 0).toLocaleString()"></span></div>
+        <div><span class="text-text-subtle">Per tick: </span><span class="tabular" x-text="`~${(schedule.est_jobs_per_tick ?? 0).toLocaleString()} jobs`"></span></div>
+        <div><span class="text-text-subtle">Ticks / full pass: </span><span class="tabular" x-text="(schedule.est_ticks_per_full_pass ?? 0).toLocaleString()"></span></div>
+        <div>
+          <span class="text-text-subtle">Last tick: </span>
+          <span class="tabular" x-text="last_tick ? last_tick.checked_at : 'never'"></span>
+          <template x-if="last_tick">
+            <span class="badge ml-1" x-text="last_tick.result"></span>
+          </template>
+        </div>
+      </div>
+    </section>
+
+    {# Status counters #}
+    <section class="grid gap-3 sm:grid-cols-3">
+      <div class="card p-4">
+        <p class="text-xs uppercase text-text-subtle">Active</p>
+        <p class="text-2xl font-semibold tabular" x-text="(counts.active ?? 0).toLocaleString()"></p>
+      </div>
+      <div class="card p-4">
+        <p class="text-xs uppercase text-text-subtle">Suspected</p>
+        <p class="text-2xl font-semibold tabular text-warning" x-text="(counts.suspected ?? 0).toLocaleString()"></p>
+      </div>
+      <div class="card p-4">
+        <p class="text-xs uppercase text-text-subtle">Expired (hidden)</p>
+        <p class="text-2xl font-semibold tabular text-danger" x-text="(counts.expired ?? 0).toLocaleString()"></p>
+      </div>
+    </section>
+
+    {# Verifier activity windows #}
+    <section class="grid gap-3 lg:grid-cols-3">
+      <template x-for="(win, label) in windows" :key="label">
+        <div class="card p-4 space-y-1">
+          <p class="text-xs uppercase text-text-subtle" x-text="label"></p>
+          <p class="text-xl font-semibold tabular" x-text="(win.total ?? 0).toLocaleString() + ' checked'"></p>
+          <div class="grid grid-cols-4 gap-2 text-xs pt-1">
+            <div><span class="text-text-subtle">Active </span><span class="tabular" x-text="(win.active ?? 0).toLocaleString()"></span></div>
+            <div><span class="text-text-subtle">Expired </span><span class="tabular text-danger" x-text="(win.expired ?? 0).toLocaleString()"></span></div>
+            <div><span class="text-text-subtle">Unknown </span><span class="tabular" x-text="(win.unknown ?? 0).toLocaleString()"></span></div>
+            <div><span class="text-text-subtle">Error </span><span class="tabular text-warning" x-text="(win.error ?? 0).toLocaleString()"></span></div>
+          </div>
+        </div>
+      </template>
+    </section>
+
+    {# Per-ATS matrix #}
+    <section class="card overflow-x-auto">
+      <h2 class="text-sm font-semibold px-3 pt-3">Per-ATS · today</h2>
+      <table class="w-full text-sm mt-2">
+        <thead class="text-text-subtle">
+          <tr class="border-b border-border-base">
+            <th class="text-left font-medium px-3 py-2">ATS</th>
+            <th class="text-right font-medium px-3 py-2">Total</th>
+            <th class="text-right font-medium px-3 py-2">Active</th>
+            <th class="text-right font-medium px-3 py-2">Expired</th>
+            <th class="text-right font-medium px-3 py-2">Unknown</th>
+            <th class="text-right font-medium px-3 py-2">Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="row in atsRows" :key="row.ats">
+            <tr class="border-b border-border-base/60">
+              <td class="px-3 py-2 font-mono text-xs" x-text="row.ats"></td>
+              <td class="px-3 py-2 tabular text-right" x-text="row.total.toLocaleString()"></td>
+              <td class="px-3 py-2 tabular text-right" x-text="row.active.toLocaleString()"></td>
+              <td class="px-3 py-2 tabular text-right text-danger" x-text="row.expired.toLocaleString()"></td>
+              <td class="px-3 py-2 tabular text-right" x-text="row.unknown.toLocaleString()"></td>
+              <td class="px-3 py-2 tabular text-right text-warning" x-text="row.error.toLocaleString()"></td>
+            </tr>
+          </template>
+          <tr x-show="!atsRows.length">
+            <td colspan="6" class="px-3 py-6 text-center text-text-subtle">No checks today.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    {# Per-detector matrix #}
+    <section class="card overflow-x-auto">
+      <h2 class="text-sm font-semibold px-3 pt-3">Per-detector · today (which matcher fired)</h2>
+      <table class="w-full text-sm mt-2">
+        <thead class="text-text-subtle">
+          <tr class="border-b border-border-base">
+            <th class="text-left font-medium px-3 py-2">Detector</th>
+            <th class="text-right font-medium px-3 py-2">Total</th>
+            <th class="text-right font-medium px-3 py-2">Active</th>
+            <th class="text-right font-medium px-3 py-2">Expired</th>
+            <th class="text-right font-medium px-3 py-2">Unknown</th>
+            <th class="text-right font-medium px-3 py-2">Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="row in detectorRows" :key="row.detector">
+            <tr class="border-b border-border-base/60">
+              <td class="px-3 py-2 font-mono text-xs" x-text="row.detector"></td>
+              <td class="px-3 py-2 tabular text-right" x-text="row.total.toLocaleString()"></td>
+              <td class="px-3 py-2 tabular text-right" x-text="row.active.toLocaleString()"></td>
+              <td class="px-3 py-2 tabular text-right text-danger" x-text="row.expired.toLocaleString()"></td>
+              <td class="px-3 py-2 tabular text-right" x-text="row.unknown.toLocaleString()"></td>
+              <td class="px-3 py-2 tabular text-right text-warning" x-text="row.error.toLocaleString()"></td>
+            </tr>
+          </template>
+          <tr x-show="!detectorRows.length">
+            <td colspan="6" class="px-3 py-6 text-center text-text-subtle">No detector fired today.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    {# Recent activity #}
+    <section class="card overflow-x-auto">
+      <h2 class="text-sm font-semibold px-3 pt-3">Recent checks (last 30)</h2>
+      <table class="w-full text-sm mt-2">
+        <thead class="text-text-subtle">
+          <tr class="border-b border-border-base">
+            <th class="text-left font-medium px-3 py-2">When</th>
+            <th class="text-left font-medium px-3 py-2">Job</th>
+            <th class="text-left font-medium px-3 py-2">ATS</th>
+            <th class="text-left font-medium px-3 py-2">Trigger</th>
+            <th class="text-right font-medium px-3 py-2">HTTP</th>
+            <th class="text-left font-medium px-3 py-2">Result</th>
+            <th class="text-left font-medium px-3 py-2">Detector</th>
+            <th class="text-left font-medium px-3 py-2 hidden md:table-cell">Detail</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="row in recent" :key="row.id">
+            <tr class="border-b border-border-base/60">
+              <td class="px-3 py-2 tabular text-text-subtle whitespace-nowrap" x-text="row.checked_at"></td>
+              <td class="px-3 py-2 truncate max-w-[16rem]">
+                <a class="link" :href="'/job/' + row.job_id" x-text="row.title || ('#' + row.job_id)"></a>
+                <span class="block text-xs text-text-subtle truncate" x-text="row.company || ''"></span>
+              </td>
+              <td class="px-3 py-2 font-mono text-xs" x-text="row.ats_type || '—'"></td>
+              <td class="px-3 py-2 text-xs" x-text="row.trigger"></td>
+              <td class="px-3 py-2 tabular text-right" x-text="row.http_status ?? '—'"></td>
+              <td class="px-3 py-2">
+                <span class="badge"
+                      :class="{
+                        'bg-success/10 text-success': row.result === 'active',
+                        'bg-danger/10 text-danger': row.result === 'expired',
+                        'bg-warning/10 text-warning': row.result === 'error',
+                      }"
+                      x-text="row.result"></span>
+              </td>
+              <td class="px-3 py-2 font-mono text-xs" x-text="row.detector || '—'"></td>
+              <td class="px-3 py-2 hidden md:table-cell text-text-subtle truncate max-w-[20rem]" x-text="row.detail || ''"></td>
+            </tr>
+          </template>
+          <tr x-show="!recent.length">
+            <td colspan="8" class="px-3 py-6 text-center text-text-subtle">No verification activity yet.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    {# Circuit breakers #}
+    <section class="card overflow-x-auto">
+      <h2 class="text-sm font-semibold px-3 pt-3">Circuit breakers</h2>
+      <table class="w-full text-sm mt-2">
+        <thead class="text-text-subtle">
+          <tr class="border-b border-border-base">
+            <th class="text-left font-medium px-3 py-2">ATS</th>
+            <th class="text-left font-medium px-3 py-2">Hour</th>
+            <th class="text-right font-medium px-3 py-2">Expire count</th>
+            <th class="text-left font-medium px-3 py-2">Status</th>
+            <th class="text-left font-medium px-3 py-2"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="b in breakers" :key="b.ats_type + ':' + b.hour_bucket">
+            <tr class="border-b border-border-base/60">
+              <td class="px-3 py-2 font-mono text-xs" x-text="b.ats_type"></td>
+              <td class="px-3 py-2 tabular text-text-subtle" x-text="b.hour_bucket"></td>
+              <td class="px-3 py-2 tabular text-right" x-text="b.expire_count"></td>
+              <td class="px-3 py-2">
+                <span class="badge"
+                      :class="b.tripped_at && !b.cleared_at ? 'bg-danger/10 text-danger' : 'bg-success/10 text-success'"
+                      x-text="b.tripped_at && !b.cleared_at ? 'TRIPPED' : 'OK'"></span>
+              </td>
+              <td class="px-3 py-2">
+                <button class="btn btn-ghost btn-xs"
+                        x-show="b.tripped_at && !b.cleared_at"
+                        @click="clearBreaker(b.ats_type)">Clear</button>
+              </td>
+            </tr>
+          </template>
+          <tr x-show="!breakers.length">
+            <td colspan="5" class="px-3 py-6 text-center text-text-subtle">No breakers tripped or recorded.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
+
+  {# ============================================================
+     TAB 2 — REVIEW & CLEANUP
+  ================================================================= #}
+  <div x-show="tab === 'review'" class="space-y-4">
+
+    {# Filter bar #}
+    <section class="card p-3 grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm items-end">
+      <label class="space-y-1.5">
+        <span class="text-xs font-medium text-text-subtle">ATS (comma-separated)</span>
+        <input class="input" placeholder="greenhouse, lever, …" x-model.lazy="review.filters.ats_csv" @change="loadReview()">
+      </label>
+      <label class="space-y-1.5">
+        <span class="text-xs font-medium text-text-subtle">Country (comma)</span>
+        <input class="input" placeholder="US, GB, …" x-model.lazy="review.filters.country_csv" @change="loadReview()">
+      </label>
+      <label class="space-y-1.5">
+        <span class="text-xs font-medium text-text-subtle">Company</span>
+        <input class="input" x-model.lazy="review.filters.company" @change="loadReview()">
+      </label>
+      <label class="space-y-1.5">
+        <span class="text-xs font-medium text-text-subtle">Reason</span>
+        <select class="input" x-model="review.filters.reason" @change="loadReview()">
+          <option value="">(any)</option>
+          <option value="user_report">user_report</option>
+          <option value="manifest_drop">manifest_drop</option>
+          <option value="http_check">http_check</option>
+          <option value="admin">admin</option>
+        </select>
+      </label>
+      <label class="space-y-1.5">
+        <span class="text-xs font-medium text-text-subtle">Detector</span>
+        <input class="input" placeholder="match_greenhouse, match_lever, …" x-model.lazy="review.filters.detector_csv" @change="loadReview()">
+      </label>
+      <label class="space-y-1.5">
+        <span class="text-xs font-medium text-text-subtle">Expired after (ISO UTC)</span>
+        <input class="input" placeholder="2026-05-01" x-model.lazy="review.filters.expired_after" @change="loadReview()">
+      </label>
+      <label class="space-y-1.5">
+        <span class="text-xs font-medium text-text-subtle">Expired before (ISO UTC)</span>
+        <input class="input" placeholder="2026-05-15" x-model.lazy="review.filters.expired_before" @change="loadReview()">
+      </label>
+      <div class="flex items-end gap-2">
+        <button class="btn btn-secondary btn-sm" @click="loadReview()">Apply</button>
+        <button class="btn btn-ghost btn-sm" @click="clearReviewFilters()">Clear</button>
+      </div>
+    </section>
+
+    {# Group stats — by ATS / by reason / by country / by company #}
+    <section class="grid lg:grid-cols-4 gap-3">
+      <div class="card p-3 space-y-1">
+        <p class="text-xs uppercase text-text-subtle">By ATS</p>
+        <template x-for="r in review.group_stats?.by_ats || []" :key="r.ats_type">
+          <div class="flex items-center justify-between text-sm">
+            <span class="font-mono text-xs truncate" x-text="r.ats_type || '(unknown)'"></span>
+            <span class="tabular" x-text="r.n.toLocaleString()"></span>
+          </div>
+        </template>
+      </div>
+      <div class="card p-3 space-y-1">
+        <p class="text-xs uppercase text-text-subtle">By reason (latest trigger)</p>
+        <template x-for="r in review.group_stats?.by_reason || []" :key="r.trigger">
+          <div class="flex items-center justify-between text-sm">
+            <span class="text-xs truncate" x-text="r.trigger"></span>
+            <span class="tabular" x-text="r.n.toLocaleString()"></span>
+          </div>
+        </template>
+      </div>
+      <div class="card p-3 space-y-1">
+        <p class="text-xs uppercase text-text-subtle">By country</p>
+        <template x-for="r in review.group_stats?.by_country || []" :key="r.country || '_'">
+          <div class="flex items-center justify-between text-sm">
+            <span class="font-mono text-xs truncate" x-text="r.country || '(unknown)'"></span>
+            <span class="tabular" x-text="r.n.toLocaleString()"></span>
+          </div>
+        </template>
+      </div>
+      <div class="card p-3 space-y-1">
+        <p class="text-xs uppercase text-text-subtle">Top companies (20)</p>
+        <template x-for="r in review.group_stats?.by_company || []" :key="r.company || '_'">
+          <div class="flex items-center justify-between text-sm">
+            <span class="text-xs truncate" :title="r.company || ''" x-text="r.company || '(unknown)'"></span>
+            <span class="tabular" x-text="r.n.toLocaleString()"></span>
+          </div>
+        </template>
+      </div>
+    </section>
+
+    {# Bulk action toolbar #}
+    <section class="card p-3 flex flex-wrap items-center justify-between gap-2">
+      <div class="text-sm">
+        <span class="text-text-subtle">Matching: </span>
+        <span class="tabular font-semibold" x-text="review.total.toLocaleString()"></span>
+        <span class="text-text-subtle"> jobs</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" class="btn btn-secondary btn-sm"
+                @click="openConfirm('reactivate')"
+                :disabled="!review.total">
+          Reactivate <span x-text="review.total"></span>
+        </button>
+        <button type="button" class="btn btn-danger btn-sm"
+                @click="openConfirm('delete')"
+                :disabled="!review.total">
+          Delete <span x-text="review.total"></span>
+        </button>
+      </div>
+    </section>
+
+    {# Jobs table #}
+    <section class="card overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-text-subtle">
+          <tr class="border-b border-border-base">
+            <th class="text-left font-medium px-3 py-2">Expired at</th>
+            <th class="text-left font-medium px-3 py-2">Title</th>
+            <th class="text-left font-medium px-3 py-2">Company</th>
+            <th class="text-left font-medium px-3 py-2">ATS</th>
+            <th class="text-left font-medium px-3 py-2">Country</th>
+            <th class="text-left font-medium px-3 py-2">Why</th>
+            <th class="text-right font-medium px-3 py-2">Reports</th>
+            <th class="text-left font-medium px-3 py-2"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="j in review.jobs" :key="j.id">
+            <tr class="border-b border-border-base/60">
+              <td class="px-3 py-2 tabular text-text-subtle whitespace-nowrap" x-text="j.verification_status_at"></td>
+              <td class="px-3 py-2 truncate max-w-[16rem]">
+                <a class="link" :href="j.url" target="_blank" rel="noopener" x-text="j.title || '(no title)'"></a>
+              </td>
+              <td class="px-3 py-2 truncate max-w-[12rem]" x-text="j.company || '—'"></td>
+              <td class="px-3 py-2 font-mono text-xs" x-text="j.ats_type || '—'"></td>
+              <td class="px-3 py-2 font-mono text-xs" x-text="j.country || '—'"></td>
+              <td class="px-3 py-2 text-xs text-text-subtle truncate max-w-[18rem]" :title="j.expired_detail || ''" x-text="j.expired_reason || '—'"></td>
+              <td class="px-3 py-2 tabular text-right" x-text="j.report_count || 0"></td>
+              <td class="px-3 py-2">
+                <button class="btn btn-ghost btn-xs" @click="reactivateOne(j.id)">Reactivate</button>
+              </td>
+            </tr>
+          </template>
+          <tr x-show="!review.jobs.length && !review.loading">
+            <td colspan="8" class="px-3 py-6 text-center text-text-subtle">No expired jobs match the current filters.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="flex items-center justify-between px-3 py-2 text-xs text-text-subtle border-t border-border-base">
+        <div>Showing <span class="tabular" x-text="review.jobs.length"></span> of <span class="tabular" x-text="review.total"></span></div>
+        <div class="flex items-center gap-1">
+          <button class="btn btn-ghost btn-xs" @click="pageDelta(-1)" :disabled="review.offset === 0">Prev</button>
+          <button class="btn btn-ghost btn-xs" @click="pageDelta(+1)" :disabled="review.offset + review.jobs.length >= review.total">Next</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  {# ─── Confirmation modal ───────────────────────────────────────── #}
+  <div x-show="confirm.open" x-cloak
+       class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+       @keydown.escape.window="confirm.open = false">
+    <div class="card w-full max-w-lg p-5 space-y-3" @click.stop>
+      <h3 class="text-lg font-semibold tracking-tight" x-text="confirm.action === 'delete' ? 'Confirm bulk delete' : 'Confirm bulk reactivate'"></h3>
+      <p class="text-sm text-text-muted">
+        You are about to
+        <span class="font-semibold" :class="confirm.action === 'delete' ? 'text-danger' : 'text-text'"
+              x-text="confirm.action === 'delete' ? 'permanently delete' : 'reactivate'"></span>
+        <span class="font-semibold tabular" x-text="review.total.toLocaleString()"></span>
+        jobs matching the current filters across
+        <span class="tabular" x-text="(review.group_stats?.by_ats || []).length"></span> ATS source(s) and
+        <span class="tabular" x-text="(review.group_stats?.by_country || []).length"></span> countries.
+      </p>
+      <template x-if="confirm.action === 'delete'">
+        <p class="text-xs text-warning">This is irreversible. Saved-job entries that reference these jobs will be cascade-deleted. Reports survive.</p>
+      </template>
+      <label class="space-y-1.5">
+        <span class="text-xs font-medium text-text-subtle">Type the exact count to confirm:</span>
+        <input type="text" inputmode="numeric" class="input tabular"
+               x-model="confirm.input"
+               :placeholder="String(review.total)">
+      </label>
+      <div class="flex justify-end gap-2 pt-2">
+        <button class="btn btn-ghost btn-sm" @click="confirm.open = false">Cancel</button>
+        <button class="btn btn-sm"
+                :class="confirm.action === 'delete' ? 'btn-danger' : 'btn-secondary'"
+                :disabled="Number(confirm.input) !== review.total || confirm.running"
+                @click="executeBulk()">
+          <span x-show="!confirm.running" x-text="confirm.action === 'delete' ? 'Delete' : 'Reactivate'"></span>
+          <span x-show="confirm.running">Working…</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block admin_scripts %}
+<script>
+  function adminExpirations() {
+    const csvToList = (s) => (s || "").split(",").map(x => x.trim()).filter(Boolean);
+    return {
+      TABS: [
+        { value: "live",   label: "Live" },
+        { value: "review", label: "Review & cleanup" },
+      ],
+      tab: "live",
+      // SSE state
+      sse: null,
+      sse_connected: false,
+      // Snapshot data
+      counts: {},
+      windows: {},
+      atsRows: [],
+      detectorRows: [],
+      recent: [],
+      breakers: [],
+      schedule: {},
+      last_tick: null,
+      // Action state
+      running: false,
+      error: "",
+      info: "",
+      // Review surface
+      review: {
+        loading: false,
+        filters: {
+          ats_csv: "", country_csv: "", detector_csv: "",
+          reason: "", company: "", expired_after: "", expired_before: "",
+        },
+        jobs: [],
+        total: 0,
+        limit: 50,
+        offset: 0,
+        group_stats: {},
+      },
+      // Confirmation modal
+      confirm: { open: false, action: "", input: "", running: false },
+
+      async init() {
+        this.connectSSE();
+        // Initial review load is lazy — happens on first tab switch.
+        this.$watch("tab", (t) => { if (t === "review") this.loadReview(); });
+      },
+
+      connectSSE() {
+        if (this.sse) { try { this.sse.close(); } catch {} }
+        const es = new EventSource("/api/admin/stream/expirations");
+        this.sse = es;
+        es.addEventListener("hello", () => { this.sse_connected = true; });
+        es.addEventListener("timeout", () => {
+          // Server bounded the stream; just reconnect.
+          es.close();
+          setTimeout(() => this.connectSSE(), 500);
+        });
+        es.onmessage = (ev) => {
+          try {
+            const data = JSON.parse(ev.data);
+            this.applySnapshot(data);
+          } catch (e) {
+            console.error("bad SSE frame", e);
+          }
+        };
+        es.onerror = () => {
+          this.sse_connected = false;
+          // EventSource auto-reconnects, but if it's a hard close (auth expired)
+          // we'll get repeated errors. Cap reconnect attempts roughly by closing
+          // after a few seconds of disconnect.
+        };
+      },
+
+      applySnapshot(data) {
+        this.counts = data.counts || {};
+        this.windows = {
+          "Today (UTC midnight)": data.today || {},
+          "Last hour":            data.last_hour || {},
+          "Last 24h":             data.last_24h || {},
+        };
+        this.atsRows = Object.entries(data.per_ats || {}).map(([ats, v]) => ({ ats, ...v }));
+        this.detectorRows = Object.entries(data.per_detector || {}).map(([detector, v]) => ({ detector, ...v }));
+        this.recent = data.recent || [];
+        this.breakers = data.breakers || [];
+        this.schedule = data.schedule || {};
+        this.last_tick = data.last_tick || null;
+      },
+
+      // ─── Live tab actions ────────────────────────────────────────
+      async runSweepNow() {
+        this.running = true;
+        this.info = ""; this.error = "";
+        try {
+          const data = await window.adminApi.post("/api/admin/expirations/run-sweep", {});
+          this.info = `Sweep finished: ${JSON.stringify(data.result || {})}`;
+        } catch (e) {
+          this.error = e.message || "Manual sweep failed";
+        } finally { this.running = false; }
+      },
+      async clearBreaker(ats) {
+        try {
+          await window.adminApi.post(`/api/admin/verifier/circuit-breaker/${ats}/clear`, {});
+        } catch (e) { this.error = e.message || "Failed to clear breaker"; }
+      },
+
+      // ─── Review tab ─────────────────────────────────────────────
+      reviewFiltersForApi() {
+        const f = this.review.filters;
+        return {
+          ats: csvToList(f.ats_csv),
+          country: csvToList(f.country_csv),
+          detector: csvToList(f.detector_csv),
+          reason: f.reason ? [f.reason] : [],
+          company: f.company || null,
+          expired_after: f.expired_after || null,
+          expired_before: f.expired_before || null,
+        };
+      },
+      async loadReview() {
+        this.review.loading = true; this.error = "";
+        const params = new URLSearchParams();
+        const f = this.reviewFiltersForApi();
+        f.ats.forEach(v => params.append("ats", v));
+        f.country.forEach(v => params.append("country", v));
+        f.detector.forEach(v => params.append("detector", v));
+        f.reason.forEach(v => params.append("reason", v));
+        if (f.company) params.set("company", f.company);
+        if (f.expired_after)  params.set("expired_after",  f.expired_after);
+        if (f.expired_before) params.set("expired_before", f.expired_before);
+        params.set("limit",  String(this.review.limit));
+        params.set("offset", String(this.review.offset));
+        try {
+          const data = await window.adminApi.get("/api/admin/expirations/review?" + params.toString());
+          this.review.jobs = data.jobs || [];
+          this.review.total = data.total || 0;
+          this.review.group_stats = data.group_stats || {};
+        } catch (e) {
+          this.error = e.message || "Failed to load review";
+        } finally { this.review.loading = false; }
+      },
+      clearReviewFilters() {
+        this.review.filters = {
+          ats_csv: "", country_csv: "", detector_csv: "",
+          reason: "", company: "", expired_after: "", expired_before: "",
+        };
+        this.review.offset = 0;
+        this.loadReview();
+      },
+      pageDelta(d) {
+        this.review.offset = Math.max(0, this.review.offset + d * this.review.limit);
+        this.loadReview();
+      },
+
+      // ─── Bulk confirmation modal ─────────────────────────────────
+      openConfirm(action) {
+        this.confirm = { open: true, action, input: "", running: false };
+      },
+      async executeBulk() {
+        if (Number(this.confirm.input) !== this.review.total) return;
+        this.confirm.running = true; this.error = ""; this.info = "";
+        // adminApi.post sends FormData; flatten the filter blob into one
+        // JSON string field so the server can decode it cleanly.
+        const body = {
+          filters_json: JSON.stringify(this.reviewFiltersForApi()),
+          confirm_count: this.review.total,
+        };
+        const endpoint = this.confirm.action === "delete"
+          ? "/api/admin/expirations/bulk-delete"
+          : "/api/admin/expirations/bulk-reactivate";
+        try {
+          const data = await window.adminApi.post(endpoint, body);
+          if (this.confirm.action === "delete") {
+            this.info = `Deleted ${data.deleted} jobs.`;
+          } else {
+            this.info = `Reactivated ${data.reactivated} jobs.`;
+          }
+          this.confirm.open = false;
+          this.review.offset = 0;
+          await this.loadReview();
+        } catch (e) {
+          this.error = e.message || "Bulk operation failed";
+        } finally { this.confirm.running = false; }
+      },
+      async reactivateOne(jobId) {
+        try {
+          await window.adminApi.post(`/api/admin/jobs/${jobId}/reactivate`, {});
+          await this.loadReview();
+        } catch (e) {
+          this.error = e.message || "Failed to reactivate";
+        }
+      },
+    };
+  }
+</script>
+{% endblock %}

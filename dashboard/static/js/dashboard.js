@@ -72,6 +72,11 @@ const DEFAULT_FILTERS = () => ({
   updated_after: null,
   updated_before: null,
   scrape_run_id: null,
+  // Availability lifecycle filter — one of:
+  //   "default"  — hide verified-expired jobs (the dashboard default)
+  //   "include"  — show all jobs including closed
+  //   "only"     — show ONLY closed (the "No longer accepting applications" view)
+  expired_view: "default",
 });
 
 function dashboard() {
@@ -198,6 +203,12 @@ function dashboard() {
       this.onFilterChange();
     },
 
+    setExpiredView(value) {
+      // value: 'default' | 'include' | 'only'
+      this.filters.expired_view = value;
+      this.onFilterChange();
+    },
+
     clearAll() {
       const keep_q = this.filters.q;  // keep the search; clearAll clears filters only
       this.filters = DEFAULT_FILTERS();
@@ -316,6 +327,43 @@ function dashboard() {
       }
     },
 
+    /* ---- broken-job report -------------------------------- */
+    async reportJob(job) {
+      // Two-tap pattern: first click shows a small inline prompt via
+      // the global flag; second click confirms. Keeps the card chrome
+      // tight without bringing in a modal library.
+      if (job._reporting) {
+        return;
+      }
+      const reason = window.prompt(
+        "Why is this job not loading? Options: not_found, position_filled, link_broken, other",
+        "not_found",
+      );
+      if (!reason) return;
+      job._reporting = true;
+      try {
+        const r = await fetch(`/api/jobs/${job.id}/report`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason }),
+        });
+        if (!r.ok) {
+          const payload = await r.json().catch(() => ({}));
+          throw new Error(payload.detail || `HTTP ${r.status}`);
+        }
+        const data = await r.json();
+        job.verification_status = data.verification_status;
+        job.is_reported = true;
+        window.dispatchEvent(new CustomEvent("applyd:job-reported", {
+          detail: { job_id: job.id, status: data.verification_status },
+        }));
+      } catch (e) {
+        alert("Could not file report: " + (e.message || "unknown error"));
+      } finally {
+        job._reporting = false;
+      }
+    },
+
     /* ---- URL sync ---------------------------------------- */
     buildParams(extras = {}) {
       const p = new URLSearchParams();
@@ -336,6 +384,8 @@ function dashboard() {
       if (f.updated_after)     p.set("updated_after",     f.updated_after);
       if (f.updated_before)    p.set("updated_before",    f.updated_before);
       if (f.scrape_run_id != null) p.set("scrape_run_id", f.scrape_run_id);
+      if (f.expired_view === "include") p.set("include_expired", "true");
+      else if (f.expired_view === "only") p.set("only_expired", "true");
 
       for (const [k, v] of Object.entries(extras)) {
         if (Array.isArray(v)) v.forEach(x => p.append(k, x));
@@ -369,6 +419,8 @@ function dashboard() {
       if (p.has("updated_after"))     f.updated_after     = p.get("updated_after");
       if (p.has("updated_before"))    f.updated_before    = p.get("updated_before");
       if (p.has("scrape_run_id"))     f.scrape_run_id     = parseInt(p.get("scrape_run_id"), 10) || null;
+      if (p.has("only_expired") && p.get("only_expired") === "true") f.expired_view = "only";
+      else if (p.has("include_expired") && p.get("include_expired") === "true") f.expired_view = "include";
       if (p.has("sort")) this.sort = p.get("sort");
     },
 

@@ -9,12 +9,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import settings
 from app.database import cached_jobs_total, get_db
+from app.identity.auth import require_user
+from app.identity.routes import verify_request_user
 from app.services import query as q
 
 router = APIRouter()
@@ -87,7 +89,15 @@ def _summary() -> dict | None:
 
 @router.get("/", response_class=HTMLResponse)
 def landing_root(request: Request):
-    return RedirectResponse(url="/dashboard", status_code=303)
+    # Smart root: anonymous users land on marketing page; signed-in users
+    # jump straight to the protected dashboard.
+    if verify_request_user(request) is not None:
+        return RedirectResponse(url="/dashboard", status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "landing.html",
+        {},
+    )
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
@@ -125,7 +135,11 @@ def styleguide(request: Request):
 
 
 @router.get("/job/{job_id}", response_class=HTMLResponse)
-def job_detail(request: Request, job_id: int):
+def job_detail(
+    request: Request,
+    job_id: int,
+    user_id: int = Depends(require_user),
+):
     """Server-render the detail view for a single job. Description is plain
     text (HTML stripped at ingest, see [[project-data-decisions]]) so we can
     safely render with `whitespace: pre-wrap` — no DOMPurify needed.
@@ -138,7 +152,8 @@ def job_detail(request: Request, job_id: int):
             raise HTTPException(404, "job not found")
         is_saved = bool(
             conn.execute(
-                "SELECT 1 FROM saved_jobs WHERE job_id = ?", (job_id,)
+                "SELECT 1 FROM saved_jobs WHERE user_id = ? AND job_id = ?",
+                (user_id, job_id),
             ).fetchone()
         )
 
@@ -198,11 +213,3 @@ def scrape_run_detail(request: Request, run_id: int):
         {"transparency": _transparency(), "run_id": run_id},
     )
 
-
-@router.get("/settings", response_class=HTMLResponse)
-def settings_page(request: Request):
-    return templates.TemplateResponse(
-        request,
-        "settings.html",
-        {"transparency": _transparency()},
-    )

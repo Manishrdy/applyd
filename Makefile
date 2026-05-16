@@ -30,7 +30,7 @@ ingest:
 run:
 	cd dashboard && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-run-dashboard:
+run-app:
 	cd dashboard && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 dev: setup init ingest

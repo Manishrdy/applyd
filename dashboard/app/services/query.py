@@ -43,7 +43,7 @@ SUMMARY_COLUMNS = (
     "j.id, j.url, j.title, j.company, j.location, j.country, j.ats_type, "
     "j.is_remote, j.posted_at, j.first_seen_at, j.salary_summary, "
     "j.salary_min_usd_annual, j.salary_max_usd_annual, j.salary_currency, "
-    "j.employment_type, j.department, j.apply_url"
+    "j.employment_type, j.department, j.apply_url, j.verification_status"
 )
 
 DETAIL_COLUMNS = (
@@ -82,6 +82,10 @@ class JobFilters:
     # Survives later writes (cron, other manual runs) bumping jobs.updated_at,
     # which the time-window filters above cannot. Backed by scrape_run_url.
     scrape_run_id: int | None = None
+    # Expiry lifecycle. Default hides verified-expired jobs; `include_expired`
+    # is the "No longer accepting applications" toggle in the left rail.
+    include_expired: bool = False
+    only_expired: bool = False
 
     def with_overrides(self, **kw) -> "JobFilters":
         return replace(self, **kw)
@@ -208,6 +212,16 @@ def _build_where(
             "j.url IN (SELECT url FROM scrape_run_url WHERE run_id = ?)"
         )
         params.append(f.scrape_run_id)
+
+    # Expiry lifecycle filter. By default the dashboard hides verified-
+    # expired jobs entirely. only_expired flips that to show ONLY expired
+    # (the "No longer accepting applications" filter category in the left
+    # rail). include_expired lifts the default exclusion when the user
+    # opts to see everything.
+    if f.only_expired:
+        conditions.append("j.verification_status = 'expired'")
+    elif not f.include_expired:
+        conditions.append("j.verification_status != 'expired'")
 
     # Role / seniority — title-only LIKE matching from the curated taxonomy.
     # Imported inline to avoid a circular import (roles.py is small / pure).
@@ -350,10 +364,18 @@ def build_facet(
     return sql, where_params + [limit]
 
 
-def row_to_summary(row, saved_ids: set[int] | None = None) -> dict:
+def row_to_summary(
+    row,
+    saved_ids: set[int] | None = None,
+    reported_ids: set[int] | None = None,
+) -> dict:
     """Convert a SQLite Row to a dict matching JobSummary."""
     posted = row["posted_at"]
     first = row["first_seen_at"]
+    keys = row.keys() if hasattr(row, "keys") else ()
+    verification_status = "active"
+    if "verification_status" in keys and row["verification_status"]:
+        verification_status = str(row["verification_status"])
     return {
         "id": row["id"],
         "url": row["url"],
@@ -375,11 +397,17 @@ def row_to_summary(row, saved_ids: set[int] | None = None) -> dict:
         "department": row["department"],
         "apply_url": row["apply_url"],
         "is_saved": row["id"] in saved_ids if saved_ids is not None else False,
+        "verification_status": verification_status,
+        "is_reported": row["id"] in reported_ids if reported_ids is not None else False,
     }
 
 
-def row_to_detail(row, saved_ids: set[int] | None = None) -> dict:
-    base = row_to_summary(row, saved_ids)
+def row_to_detail(
+    row,
+    saved_ids: set[int] | None = None,
+    reported_ids: set[int] | None = None,
+) -> dict:
+    base = row_to_summary(row, saved_ids, reported_ids)
     base.update({
         "description": row["description"],
         "requisition_id": row["requisition_id"],

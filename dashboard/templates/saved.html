@@ -93,7 +93,22 @@
             <template x-if="item.ats_type">
               <span class="badge" x-text="item.ats_type"></span>
             </template>
+            <template x-if="item.verification_status === 'suspected'">
+              <span class="badge bg-warning/10 text-warning">May not be available</span>
+            </template>
+            <template x-if="item.verification_status === 'expired'">
+              <span class="badge bg-danger/10 text-danger">Closed</span>
+            </template>
           </div>
+
+          {# Expired banner — surfaces strongly on saved-jobs because this
+             is the most common spot a user re-encounters a job they care
+             about that has since closed. #}
+          <template x-if="item.verification_status === 'expired'">
+            <div class="text-xs rounded-base border border-danger/30 bg-danger/5 text-danger px-2 py-1.5">
+              No longer accepting applications.
+            </div>
+          </template>
 
           {# Notes — click to edit; Esc cancels, blur saves #}
           <div class="text-xs"

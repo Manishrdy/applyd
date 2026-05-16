@@ -1,7 +1,7 @@
-{% extends "base.html" %}
+{% extends "admin/_layout.html" %}
 {% from "_components/macros.html" import button, badge, skeleton_line %}
 
-{% block title %}Settings{% endblock %}
+{% set admin_page_title = "Settings" %}
 
 {% block body_attrs %}x-data="settingsPage()" x-init="init()"{% endblock %}
 
@@ -9,7 +9,7 @@
   <script defer src="{{ url_for('static', path='js/settings.js') }}"></script>
 {% endblock %}
 
-{% block main %}
+{% block admin_body %}
 <div class="settings-shell space-y-8 max-w-6xl">
 
   <header class="settings-hero-clean space-y-1">

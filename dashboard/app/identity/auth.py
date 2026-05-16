@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError, VerificationError
-from fastapi import HTTPException
+from fastapi import HTTPException, Request, status
 
 from app.config import settings
 from app.database import get_db
@@ -668,6 +668,18 @@ def admin_set_user_role(user_id: int, role: str) -> bool:
             (role, user_id),
         )
     return int(cur.rowcount or 0) > 0
+
+
+def require_user(request: Request) -> int:
+    """FastAPI dependency: return authenticated user_id or raise 401.
+
+    `auth_middleware` populates `request.state.user_id` for protected
+    routes; this just exposes it cleanly and fails closed if missing.
+    """
+    user_id = getattr(request.state, "user_id", None)
+    if not isinstance(user_id, int):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+    return user_id
 
 
 def admin_list_users(limit: int = 200) -> list[dict]:

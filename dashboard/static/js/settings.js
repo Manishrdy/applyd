@@ -25,9 +25,9 @@ function settingsPage() {
       this.isLoading = true;
       try {
         const [info, byAts, log] = await Promise.all([
-          fetch("/api/settings/").then(r => r.json()),
-          fetch("/api/settings/by_ats").then(r => r.json()),
-          fetch("/api/settings/ingest_log?limit=20").then(r => r.json()),
+          fetch("/api/admin/settings/").then(r => r.json()),
+          fetch("/api/admin/settings/by_ats").then(r => r.json()),
+          fetch("/api/admin/settings/ingest_log?limit=20").then(r => r.json()),
         ]);
         this.info = info;
         this.byAts = byAts;
@@ -45,7 +45,7 @@ function settingsPage() {
       this.isVacuuming = true;
       this.vacuumResult = null;
       try {
-        const r = await fetch("/api/settings/vacuum", { method: "POST" });
+        const r = await fetch("/api/admin/settings/vacuum", { method: "POST" });
         const data = await r.json();
         if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
         this.vacuumResult = { status: "success", ...data };
@@ -62,7 +62,7 @@ function settingsPage() {
       this.isRefreshing = true;
       this.refreshResult = null;
       try {
-        const r = await fetch(`/api/ingest?force=${force}`, { method: "POST" });
+        const r = await fetch(`/api/admin/ingest?force=${force}`, { method: "POST" });
         const data = await r.json();
         if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
         this.refreshResult = data;

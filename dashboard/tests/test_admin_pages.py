@@ -19,6 +19,7 @@ ADMIN_PAGES = [
     ("/admin/sessions",     "Active sessions"),
     ("/admin/auth-log",     "Failed logins"),
     ("/admin/rate-limits",  "Rate limits"),
+    ("/admin/settings",     "Settings"),
     ("/admin/maintenance",  "Maintenance mode"),
     ("/admin/backups",      "Backups"),
     ("/admin/audit",        "Admin audit log"),

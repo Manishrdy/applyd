@@ -29,9 +29,9 @@ def test_all_api_endpoints_have_basic_coverage_smoke(client, monkeypatch):
         ("GET", "/api/stats/top_companies"),
         ("GET", "/api/stats/salary_range"),
         ("GET", "/api/stats/remote_vs_onsite"),
-        ("GET", "/api/settings/"),
-        ("GET", "/api/settings/by_ats"),
-        ("GET", "/api/settings/ingest_log"),
+        ("GET", "/api/admin/settings/"),
+        ("GET", "/api/admin/settings/by_ats"),
+        ("GET", "/api/admin/settings/ingest_log"),
     ]
 
     for method, path in endpoints:

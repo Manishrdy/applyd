@@ -6,7 +6,6 @@ HTML_ROUTES = [
     "/styleguide",
     "/saved",
     "/stats",
-    "/settings",
 ]
 
 
@@ -17,9 +16,17 @@ def test_html_pages_render(client):
         assert "text/html" in res.headers["content-type"]
 
 
-def test_html_page_markers(client):
+def test_html_page_markers(client, monkeypatch):
+    from app.routers import pages as pages_router
+
+    monkeypatch.setattr(
+        pages_router,
+        "verify_request_user",
+        lambda request: {"authenticated": True, "user_id": 1, "email": "user@test", "role": "user"},
+    )
     home = client.get("/", follow_redirects=False)
     assert home.status_code == 303
+    assert home.headers.get("location") == "/dashboard"
 
     dashboard = client.get("/dashboard")
     assert "jobs" in dashboard.text.lower()
@@ -39,6 +46,10 @@ def test_job_page_found_and_404(client):
 
 
 def test_dashboard_redirects_when_logged_out(anon_client):
+    home = anon_client.get("/", follow_redirects=False)
+    assert home.status_code == 200
+    assert "Sign in" in home.text
+
     res = anon_client.get("/dashboard", follow_redirects=False)
     assert res.status_code == 303
     assert res.headers["location"].startswith("/signin")

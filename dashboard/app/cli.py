@@ -158,6 +158,36 @@ def cmd_import_identity_db(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_verify_now(args: argparse.Namespace) -> int:
+    """Manually drive one verifier batch — bypasses APScheduler entirely.
+
+    Useful when you've been running with --reload (which keeps resetting
+    the in-process scheduler) and you want immediate proof the verifier
+    works against your real corpus.
+    """
+    import asyncio
+
+    from app.services import verifier as verifier_svc
+
+    init_db()
+    mode = args.mode
+    if mode == "sweep":
+        result = asyncio.run(verifier_svc.drain_periodic_sweep(
+            batch_size=args.batch if args.batch and args.batch > 0 else None
+        ))
+    elif mode == "suspected":
+        result = asyncio.run(verifier_svc.drain_suspected(batch_size=args.batch or None))
+    elif mode == "drops":
+        result = asyncio.run(verifier_svc.drain_manifest_drops(
+            batch_size=args.batch if args.batch and args.batch > 0 else 200
+        ))
+    else:
+        print(f"unknown mode: {mode}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
 def main() -> int:
     _setup_logging()
     parser = argparse.ArgumentParser(prog="app.cli")
@@ -216,6 +246,24 @@ def main() -> int:
         help="one-time import of identity-service data into dashboard applyd.db",
     )
     p_import.set_defaults(func=cmd_import_identity_db)
+
+    p_verify = sub.add_parser(
+        "verify-now",
+        help="run one verifier batch right now (bypasses the scheduler)",
+    )
+    p_verify.add_argument(
+        "--mode",
+        choices=("sweep", "suspected", "drops"),
+        default="sweep",
+        help="sweep = active corpus; suspected = drain suspected pool; drops = manifest-drop sweep",
+    )
+    p_verify.add_argument(
+        "--batch",
+        type=int,
+        default=0,
+        help="batch size (0 = auto from settings)",
+    )
+    p_verify.set_defaults(func=cmd_verify_now)
 
     args = parser.parse_args()
     return args.func(args)

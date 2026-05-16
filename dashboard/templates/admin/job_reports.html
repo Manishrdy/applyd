@@ -1,0 +1,134 @@
+{% extends "admin/_layout.html" %}
+{% set admin_page_title = "Admin · Job reports" %}
+
+{% block admin_body %}
+<div x-data="adminJobReports()" x-init="init()" class="space-y-4">
+
+  <header class="flex items-baseline justify-between">
+    <h1 class="text-xl font-semibold tracking-tight">Job reports</h1>
+    <button type="button" class="btn btn-secondary btn-sm" @click="reload()" :disabled="loading">
+      <span x-show="!loading">Refresh</span>
+      <span x-show="loading">Refreshing…</span>
+    </button>
+  </header>
+
+  <div x-show="error" x-cloak
+       class="card border-danger/40 bg-danger/10 text-danger px-4 py-3 text-sm" x-text="error"></div>
+
+  <section class="card p-3 flex flex-wrap gap-2 items-end">
+    <label class="space-y-1.5">
+      <span class="text-xs font-medium text-text-subtle">Status</span>
+      <select class="input" x-model="filters.status" @change="reload()">
+        <option value="">All</option>
+        <option value="active">Active</option>
+        <option value="suspected">Suspected</option>
+        <option value="expired">Expired</option>
+      </select>
+    </label>
+    <label class="space-y-1.5">
+      <span class="text-xs font-medium text-text-subtle">Min reports</span>
+      <input type="number" class="input tabular w-24" min="0" max="50"
+             x-model.number="filters.min_reports" @change="reload()">
+    </label>
+    <label class="space-y-1.5">
+      <span class="text-xs font-medium text-text-subtle">Limit</span>
+      <input type="number" class="input tabular w-24" min="1" max="200"
+             x-model.number="filters.limit" @change="reload()">
+    </label>
+  </section>
+
+  <section class="card overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-text-subtle">
+        <tr class="border-b border-border-base">
+          <th class="text-left font-medium px-3 py-2">Last reported</th>
+          <th class="text-left font-medium px-3 py-2">Title</th>
+          <th class="text-left font-medium px-3 py-2">Company</th>
+          <th class="text-left font-medium px-3 py-2">ATS</th>
+          <th class="text-left font-medium px-3 py-2">Status</th>
+          <th class="text-right font-medium px-3 py-2">Reports</th>
+          <th class="text-right font-medium px-3 py-2">Drops</th>
+          <th class="text-left font-medium px-3 py-2">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="r in reports" :key="r.id">
+          <tr class="border-b border-border-base/60">
+            <td class="px-3 py-2 tabular text-text-subtle whitespace-nowrap" x-text="r.last_reported_at"></td>
+            <td class="px-3 py-2"><a class="link" :href="r.url" target="_blank" rel="noopener" x-text="r.title || '(no title)'"></a></td>
+            <td class="px-3 py-2" x-text="r.company || '—'"></td>
+            <td class="px-3 py-2 font-mono text-xs" x-text="r.ats_type || '—'"></td>
+            <td class="px-3 py-2">
+              <span class="badge"
+                    :class="{
+                      'bg-danger/10 text-danger': r.verification_status === 'expired',
+                      'bg-warning/10 text-warning': r.verification_status === 'suspected',
+                    }"
+                    x-text="r.verification_status"></span>
+            </td>
+            <td class="px-3 py-2 tabular text-right">
+              <span x-text="r.distinct_reporters"></span>
+              <span class="text-text-subtle">/</span>
+              <span x-text="r.report_count"></span>
+            </td>
+            <td class="px-3 py-2 tabular text-right" x-text="r.missed_ingest_cycles"></td>
+            <td class="px-3 py-2 space-x-1">
+              <button class="btn btn-ghost btn-xs" @click="expire(r.id)">Expire</button>
+              <button class="btn btn-ghost btn-xs" @click="reactivate(r.id)">Reactivate</button>
+            </td>
+          </tr>
+        </template>
+        <tr x-show="!reports.length && !loading">
+          <td colspan="8" class="px-3 py-6 text-center text-text-subtle">No reports match.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</div>
+{% endblock %}
+
+{% block admin_scripts %}
+<script>
+  function adminJobReports() {
+    return {
+      loading: false,
+      error: "",
+      reports: [],
+      filters: { status: "", min_reports: 1, limit: 50 },
+      async init() { await this.reload(); },
+      async reload() {
+        this.loading = true;
+        this.error = "";
+        const params = new URLSearchParams();
+        if (this.filters.status) params.set("status", this.filters.status);
+        params.set("min_reports", String(this.filters.min_reports || 1));
+        params.set("limit", String(this.filters.limit || 50));
+        try {
+          const data = await window.adminApi.get("/api/admin/job-reports?" + params.toString());
+          this.reports = data.reports || [];
+        } catch (e) {
+          this.error = e.message || "Failed to load reports";
+        } finally {
+          this.loading = false;
+        }
+      },
+      async expire(jobId) {
+        try {
+          await window.adminApi.post(`/api/admin/jobs/${jobId}/expire`, {});
+          await this.reload();
+        } catch (e) {
+          this.error = e.message || "Failed to expire job";
+        }
+      },
+      async reactivate(jobId) {
+        try {
+          await window.adminApi.post(`/api/admin/jobs/${jobId}/reactivate`, {});
+          await this.reload();
+        } catch (e) {
+          this.error = e.message || "Failed to reactivate job";
+        }
+      },
+    };
+  }
+</script>
+{% endblock %}

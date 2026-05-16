@@ -8,6 +8,38 @@ def _job_ids(body: dict) -> list[int]:
     return [j["id"] for j in body["jobs"]]
 
 
+def test_default_filter_hides_expired(client, lifecycle_seed):
+    """The default jobs list must NOT include verified-expired rows."""
+    res = client.get("/api/jobs/?country=US&posted_hours=0")
+    assert res.status_code == 200
+    ids = _job_ids(res.json())
+    assert 8 not in ids  # expired row hidden
+    assert 7 in ids       # suspected row still visible
+
+
+def test_include_expired_shows_all(client, lifecycle_seed):
+    res = client.get("/api/jobs/?country=US&posted_hours=0&include_expired=true")
+    assert res.status_code == 200
+    ids = _job_ids(res.json())
+    assert 8 in ids
+    assert 7 in ids
+
+
+def test_only_expired_shows_only_closed(client, lifecycle_seed):
+    res = client.get("/api/jobs/?country=US&posted_hours=0&only_expired=true")
+    assert res.status_code == 200
+    ids = _job_ids(res.json())
+    assert ids == [8]
+
+
+def test_job_summary_carries_verification_status(client, lifecycle_seed):
+    res = client.get("/api/jobs/?country=US&posted_hours=0")
+    assert res.status_code == 200
+    statuses = {j["id"]: j["verification_status"] for j in res.json()["jobs"]}
+    assert statuses[7] == "suspected"
+    assert all(s in {"active", "suspected"} for s in statuses.values())
+
+
 def test_jobs_list_filters_and_pagination(client):
     res = client.get("/api/jobs/?country=US&posted_hours=0&limit=2&page=1&sort=posted_at_desc")
     assert res.status_code == 200

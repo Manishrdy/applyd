@@ -7,6 +7,7 @@
 
 {% block head %}
   <script defer src="{{ url_for('static', path='js/dashboard.js') }}"></script>
+  <script defer src="{{ url_for('static', path='js/my_activity.js') }}"></script>
 {% endblock %}
 
 {# ============================================================
@@ -46,10 +47,6 @@
      class="inline-flex items-center rounded-pill px-3 py-1.5 text-xs font-medium text-text-muted transition-colors hover:bg-surface-muted hover:text-text">
     Stats
   </a>
-  <a href="/settings"
-     class="inline-flex items-center rounded-pill px-3 py-1.5 text-xs font-medium text-text-muted transition-colors hover:bg-surface-muted hover:text-text">
-    Settings
-  </a>
 </nav>
 {% endblock %}
 
@@ -57,6 +54,83 @@
    Main layout — sticky filter sidebar + results column.
 ================================================================= #}
 {% block main %}
+
+<section x-data="myActivity()" x-init="init()" x-cloak
+         class="mb-6 rounded-lg border border-border-base bg-surface-elevated/60 p-4">
+  <header class="flex items-center justify-between mb-3">
+    <h2 class="text-sm font-semibold tracking-tight text-text-muted uppercase">My activity</h2>
+    <a href="/saved" class="text-xs text-text-subtle hover:text-accent">View saved →</a>
+  </header>
+
+  <div x-show="loaded && !error"
+       class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+    <div class="rounded-base border border-border-base p-3">
+      <p class="text-xs text-text-subtle">Saved</p>
+      <p class="text-xl font-semibold tabular" x-text="total_saved"></p>
+      <p class="text-[10px] text-text-subtle mt-1">
+        <span x-text="by_status.queued"></span>q ·
+        <span x-text="by_status.applied"></span>a ·
+        <span x-text="by_status.skipped"></span>s ·
+        <span x-text="by_status.archived"></span>z
+      </p>
+    </div>
+
+    <div class="rounded-base border border-border-base p-3">
+      <p class="text-xs text-text-subtle">Applied</p>
+      <p class="text-xl font-semibold tabular" x-text="by_status.applied"></p>
+    </div>
+
+    <div class="rounded-base border border-border-base p-3">
+      <p class="text-xs text-text-subtle">Conversion</p>
+      <p class="text-xl font-semibold tabular"><span x-text="conversionPct()"></span>%</p>
+      <p class="text-[10px] text-text-subtle mt-1">applied / saved</p>
+    </div>
+
+    <div class="rounded-base border border-border-base p-3 col-span-2">
+      <div class="flex items-baseline justify-between">
+        <p class="text-xs text-text-subtle">Saves · 30d</p>
+        <p class="text-xs tabular text-text-muted"><span x-text="sparkSum()"></span></p>
+      </div>
+      <svg viewBox="0 0 120 28" class="mt-1 w-full h-7 text-accent" preserveAspectRatio="none"
+           x-show="sparkSum() > 0">
+        <polyline fill="none" stroke="currentColor" stroke-width="1.5"
+                  stroke-linejoin="round" stroke-linecap="round"
+                  :points="sparkline()"/>
+      </svg>
+      <p x-show="sparkSum() === 0"
+         class="text-[10px] text-text-subtle italic mt-1">No saves yet</p>
+    </div>
+  </div>
+
+  <div x-show="loaded && !error && (top_companies.length || top_ats.length)"
+       class="grid sm:grid-cols-2 gap-4 mt-3 pt-3 border-t border-border-base">
+    <div>
+      <p class="text-[11px] text-text-subtle uppercase tracking-wider mb-1">Top companies (yours)</p>
+      <ul class="space-y-0.5 text-xs">
+        <template x-for="row in top_companies.slice(0, 5)" :key="row.key">
+          <li class="flex items-center justify-between gap-2">
+            <span class="truncate" x-text="row.key"></span>
+            <span class="tabular text-text-subtle" x-text="row.count"></span>
+          </li>
+        </template>
+      </ul>
+    </div>
+    <div>
+      <p class="text-[11px] text-text-subtle uppercase tracking-wider mb-1">Top ATS (yours)</p>
+      <ul class="space-y-0.5 text-xs">
+        <template x-for="row in top_ats.slice(0, 5)" :key="row.key">
+          <li class="flex items-center justify-between gap-2">
+            <span class="truncate" x-text="row.key"></span>
+            <span class="tabular text-text-subtle" x-text="row.count"></span>
+          </li>
+        </template>
+      </ul>
+    </div>
+  </div>
+
+  <p x-show="!loaded" class="text-xs text-text-subtle">Loading activity…</p>
+  <p x-show="error" class="text-xs text-danger" x-text="error"></p>
+</section>
 
 <div class="grid lg:grid-cols-[300px_1fr] gap-6 xl:gap-8">
 
@@ -261,24 +335,38 @@
                   <p class="text-sm text-text-muted truncate mt-0.5" x-text="job.company || '—'"></p>
                 </div>
 
-                {# save button — z-10 so it sits above the stretched-link
-                   pseudo-element and intercepts its own clicks. #}
-                <button type="button"
-                        class="job-save"
-                        :class="job.is_saved ? 'is-active' : ''"
-                        @click.stop.prevent="toggleSave(job)"
-                        :title="job.is_saved ? 'Remove from saved' : 'Save for later'"
-                        :aria-label="job.is_saved ? 'Unsave' : 'Save'"
-                        :aria-pressed="job.is_saved">
-                  <template x-if="!job.is_saved">
+                {# top-right action cluster — save + report. z-10 so they sit
+                   above the stretched-link pseudo-element and intercept their
+                   own clicks. Report sits to the LEFT of save so its hover
+                   region doesn't push save off the corner. #}
+                <div class="flex items-center gap-1 shrink-0">
+                  <button type="button"
+                          class="job-save text-text-subtle hover:text-danger"
+                          @click.stop.prevent="reportJob(job)"
+                          :disabled="job._reporting || job.is_reported"
+                          :title="job.is_reported ? 'Reported — thank you' : 'Report broken / expired'"
+                          aria-label="Report broken job">
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+                      <path d="M4 22V4M4 15h12l-2-3 2-3H4"/>
                     </svg>
-                  </template>
-                  <template x-if="job.is_saved">
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
-                  </template>
-                </button>
+                  </button>
+                  <button type="button"
+                          class="job-save"
+                          :class="job.is_saved ? 'is-active' : ''"
+                          @click.stop.prevent="toggleSave(job)"
+                          :title="job.is_saved ? 'Remove from saved' : 'Save for later'"
+                          :aria-label="job.is_saved ? 'Unsave' : 'Save'"
+                          :aria-pressed="job.is_saved">
+                    <template x-if="!job.is_saved">
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+                      </svg>
+                    </template>
+                    <template x-if="job.is_saved">
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+                    </template>
+                  </button>
+                </div>
               </div>
 
               {# meta chips row #}
@@ -292,6 +380,12 @@
                 </template>
                 <template x-if="job.employment_type">
                   <span class="badge" x-text="facetLabel('employment_type', job.employment_type)"></span>
+                </template>
+                <template x-if="job.verification_status === 'suspected'">
+                  <span class="badge bg-warning/10 text-warning" title="Reported as possibly no longer available">May not be available</span>
+                </template>
+                <template x-if="job.verification_status === 'expired'">
+                  <span class="badge bg-danger/10 text-danger" title="Verified as no longer accepting applications">Closed</span>
                 </template>
               </div>
 
@@ -361,6 +455,12 @@
                 <template x-if="job.ats_type">
                   <span class="badge" x-text="facetLabel('ats', job.ats_type)"></span>
                 </template>
+                <template x-if="job.verification_status === 'suspected'">
+                  <span class="badge bg-warning/10 text-warning">May not be available</span>
+                </template>
+                <template x-if="job.verification_status === 'expired'">
+                  <span class="badge bg-danger/10 text-danger">Closed</span>
+                </template>
               </div>
 
               <div class="hidden lg:block min-w-0 max-w-[14rem] shrink-0">
@@ -397,6 +497,16 @@
                   <template x-if="job.is_saved">
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
                   </template>
+                </button>
+                <button type="button"
+                        class="job-report text-text-subtle hover:text-danger px-1.5 py-1 rounded-base"
+                        @click.stop.prevent="reportJob(job)"
+                        :disabled="job._reporting || job.is_reported"
+                        :title="job.is_reported ? 'Reported — thank you' : 'Report broken / expired'"
+                        aria-label="Report broken job">
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 22V4M4 15h12l-2-3 2-3H4"/>
+                  </svg>
                 </button>
               </div>
             </div>

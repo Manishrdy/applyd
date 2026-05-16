@@ -1,19 +1,30 @@
-"""Operations + observability surface — drives the /settings page."""
+"""Admin settings endpoints + page.
+
+Moves the former public `/settings` use-case under `/admin/settings` and
+admin-gates all related JSON APIs.
+"""
 
 from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+from app.admin import audit
+from app.admin.deps import AdminUser, require_admin_user
 from app.config import settings
 from app.database import db_reclaimable_bytes, get_db, last_vacuum_at, vacuum_db
 
-router = APIRouter()
+api_router = APIRouter()
+legacy_api_router = APIRouter()
+page_router = APIRouter()
 log = logging.getLogger(__name__)
+templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[3] / "templates"))
 
 
 class IngestLogRow(BaseModel):
@@ -32,7 +43,6 @@ class AtsCount(BaseModel):
 
 
 class SettingsInfo(BaseModel):
-    # storage
     db_path: str
     db_size_bytes: int
     db_reclaimable_bytes: int
@@ -41,7 +51,6 @@ class SettingsInfo(BaseModel):
     cache_size_bytes: int
     total_jobs: int
     total_saved: int
-    # config
     rolling_window_days: int
     ingest_hour_utc: int
     ingest_poll_interval_minutes: int
@@ -64,8 +73,17 @@ def _dir_size(path: str) -> int:
     return total
 
 
-@router.get("/", response_model=SettingsInfo)
-def info() -> SettingsInfo:
+@page_router.get("/admin/settings")
+def admin_settings_page(request: Request, admin: AdminUser = Depends(require_admin_user)):
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {"admin": admin, "active_page": "settings"},
+    )
+
+
+@api_router.get("/settings/", response_model=SettingsInfo)
+def info(admin: AdminUser = Depends(require_admin_user)) -> SettingsInfo:
     db_path = str(settings.db_path)
     cache_dir = str(settings.cache_dir)
     db_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
@@ -96,9 +114,8 @@ def info() -> SettingsInfo:
     )
 
 
-@router.get("/by_ats", response_model=list[AtsCount])
-def by_ats_full() -> list[AtsCount]:
-    """Per-ATS row counts — all sources, no limit, no time filter (raw DB state)."""
+@api_router.get("/settings/by_ats", response_model=list[AtsCount])
+def by_ats_full(admin: AdminUser = Depends(require_admin_user)) -> list[AtsCount]:
     with get_db() as conn:
         rows = conn.execute(
             "SELECT ats_type, COUNT(*) AS n FROM jobs "
@@ -117,19 +134,14 @@ class VacuumResult(BaseModel):
     last_vacuum_at: str
 
 
-@router.post("/vacuum", response_model=VacuumResult)
-def vacuum() -> VacuumResult:
-    """Manually reclaim free pages via SQLite VACUUM. Blocking; can take minutes."""
+@api_router.post("/settings/vacuum", response_model=VacuumResult)
+def vacuum(request: Request, admin: AdminUser = Depends(require_admin_user)) -> VacuumResult:
     try:
         result = vacuum_db()
     except Exception as e:
         log.exception("manual VACUUM failed")
         raise HTTPException(status_code=500, detail=str(e))
-    log.info(
-        "manual VACUUM reclaimed %.1f MB in %.1fs",
-        result["reclaimed_bytes"] / (1024 * 1024),
-        result["duration_seconds"],
-    )
+    audit.record(admin=admin, action="vacuum_db", detail=result, request=request)
     return VacuumResult(
         size_before_bytes=result["size_before_bytes"],
         size_after_bytes=result["size_after_bytes"],
@@ -141,8 +153,9 @@ def vacuum() -> VacuumResult:
     )
 
 
-@router.get("/ingest_log", response_model=list[IngestLogRow])
+@api_router.get("/settings/ingest_log", response_model=list[IngestLogRow])
 def ingest_log(
+    admin: AdminUser = Depends(require_admin_user),
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[IngestLogRow]:
     with get_db() as conn:
@@ -153,3 +166,26 @@ def ingest_log(
             (limit,),
         ).fetchall()
     return [IngestLogRow(**dict(r)) for r in rows]
+
+
+@legacy_api_router.get("/", response_model=SettingsInfo)
+def legacy_info(admin: AdminUser = Depends(require_admin_user)) -> SettingsInfo:
+    return info(admin)
+
+
+@legacy_api_router.get("/by_ats", response_model=list[AtsCount])
+def legacy_by_ats(admin: AdminUser = Depends(require_admin_user)) -> list[AtsCount]:
+    return by_ats_full(admin)
+
+
+@legacy_api_router.post("/vacuum", response_model=VacuumResult)
+def legacy_vacuum(request: Request, admin: AdminUser = Depends(require_admin_user)) -> VacuumResult:
+    return vacuum(request, admin)
+
+
+@legacy_api_router.get("/ingest_log", response_model=list[IngestLogRow])
+def legacy_ingest_log(
+    admin: AdminUser = Depends(require_admin_user),
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[IngestLogRow]:
+    return ingest_log(admin, limit)

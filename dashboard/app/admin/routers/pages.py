@@ -85,3 +85,21 @@ def admin_audit_page(request: Request, admin: AdminUser = Depends(require_admin_
     return templates.TemplateResponse(
         request, "admin/audit.html", _ctx(request, admin, active_page="audit"),
     )
+
+
+@router.get("/admin/job-reports")
+def admin_job_reports_page(request: Request, admin: AdminUser = Depends(require_admin_user)):
+    return templates.TemplateResponse(
+        request,
+        "admin/job_reports.html",
+        _ctx(request, admin, active_page="job_reports"),
+    )
+
+
+@router.get("/admin/expirations")
+def admin_expirations_page(request: Request, admin: AdminUser = Depends(require_admin_user)):
+    return templates.TemplateResponse(
+        request,
+        "admin/expirations.html",
+        _ctx(request, admin, active_page="expirations"),
+    )

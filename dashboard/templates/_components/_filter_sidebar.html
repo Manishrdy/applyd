@@ -241,4 +241,36 @@
     </label>
   </section>
 
+  {# ===== Availability ========================================== #}
+  <section class="filter-section">
+    <header class="filter-legend">
+      <span>Availability</span>
+      <span class="filter-active"
+            x-show="filters.expired_view !== 'default'">1</span>
+    </header>
+    <div class="filter-segmented">
+      <button type="button"
+              :class="filters.expired_view === 'default' ? 'is-active' : ''"
+              @click="setExpiredView('default')"
+              title="Hide jobs we've verified as no longer accepting applications">
+        Open
+      </button>
+      <button type="button"
+              :class="filters.expired_view === 'include' ? 'is-active' : ''"
+              @click="setExpiredView('include')"
+              title="Show all jobs including those marked closed">
+        All
+      </button>
+      <button type="button"
+              :class="filters.expired_view === 'only' ? 'is-active' : ''"
+              @click="setExpiredView('only')"
+              title="Only jobs we've verified as no longer accepting applications">
+        Closed
+      </button>
+    </div>
+    <p class="text-xs text-text-subtle pt-1 leading-snug">
+      "Closed" = no longer accepting applications, confirmed via reports + auto-check.
+    </p>
+  </section>
+
 </div>

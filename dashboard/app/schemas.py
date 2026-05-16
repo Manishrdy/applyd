@@ -40,6 +40,11 @@ class JobSummary(BaseModel):
     department: str | None = None
     apply_url: str | None = None
     is_saved: bool = False
+    verification_status: str = Field(
+        "active",
+        description="active | suspected | expired — see services/job_lifecycle.py",
+    )
+    is_reported: bool = False
 
 
 class JobDetail(JobSummary):
@@ -146,3 +151,32 @@ class RemoteVsOnsite(BaseModel):
     remote: int
     onsite: int
     unknown: int
+
+
+# ---- Per-user activity stats (/api/me/stats) -------------------------------
+
+
+class ByStatusCounts(BaseModel):
+    queued: int
+    applied: int
+    skipped: int
+    archived: int
+
+
+class SavesPerDayPoint(BaseModel):
+    date: str  # YYYY-MM-DD
+    count: int
+
+
+class TopCount(BaseModel):
+    key: str
+    count: int
+
+
+class MyStatsResponse(BaseModel):
+    total_saved: int
+    by_status: ByStatusCounts
+    saves_per_day: list[SavesPerDayPoint]
+    top_companies: list[TopCount]
+    top_ats: list[TopCount]
+    conversion_rate: float

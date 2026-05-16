@@ -34,10 +34,11 @@ from app.logging_config import (
 from app.admin import register_admin
 from app.admin.services import maintenance as maintenance_service
 from app.routers import jobs as jobs_router
+from app.routers import me as me_router
 from app.routers import pages as pages_router
+from app.routers import reports as reports_router
 from app.routers import saved as saved_router
 from app.routers import scrape as scrape_router
-from app.routers import settings as settings_router
 from app.routers import stats as stats_router
 from app.scheduler import start_scheduler, stop_scheduler
 from app.identity.routes import router as identity_router, verify_request_user
@@ -69,7 +70,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="applyd dashboard",
     description="MS1 — job search + filter dashboard over the jobhive dataset.",
-    version="1.0.1",
+    version="1.0.2",
     lifespan=lifespan,
 )
 
@@ -85,10 +86,11 @@ _static_dir = Path(__file__).resolve().parents[1] / "static"
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 app.include_router(jobs_router.router, prefix="/api/jobs", tags=["jobs"])
+app.include_router(reports_router.router, prefix="/api/jobs", tags=["jobs"])
 app.include_router(saved_router.router, prefix="/api/saved", tags=["saved"])
 app.include_router(stats_router.router, prefix="/api/stats", tags=["stats"])
-app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
 app.include_router(scrape_router.router, prefix="/api/scrape", tags=["scrape"])
+app.include_router(me_router.router, prefix="/api/me", tags=["me"])
 app.include_router(pages_router.router, tags=["pages"])
 app.include_router(identity_router, tags=["identity"])
 # Admin module — see app/admin/. Registered AFTER the regular routers so
@@ -192,7 +194,6 @@ async def auth_middleware(request: Request, call_next):
         "/dashboard",
         "/saved",
         "/stats",
-        "/settings",
         "/scrape",
         "/job/",
         "/admin",

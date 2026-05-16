@@ -6,11 +6,12 @@ import csv
 import io
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.config import settings
 from app.database import get_db
+from app.identity.auth import require_user
 from app.schemas import (
     CompaniesResponse,
     CompanyHit,
@@ -39,18 +40,31 @@ SORT_ALIASES = {
 }
 
 
-def _saved_ids_for(conn, job_ids: list[int]) -> set[int]:
+def _saved_ids_for(conn, user_id: int, job_ids: list[int]) -> set[int]:
     if not job_ids:
         return set()
     ph = ",".join(["?"] * len(job_ids))
     rows = conn.execute(
-        f"SELECT job_id FROM saved_jobs WHERE job_id IN ({ph})", job_ids
+        f"SELECT job_id FROM saved_jobs WHERE user_id = ? AND job_id IN ({ph})",
+        [user_id, *job_ids],
     ).fetchall()
     return {r["job_id"] for r in rows}
 
 
+def _reported_ids_for(conn, user_id: int, job_ids: list[int]) -> set[int]:
+    if not job_ids:
+        return set()
+    ph = ",".join(["?"] * len(job_ids))
+    rows = conn.execute(
+        f"SELECT job_id FROM job_reports WHERE user_id = ? AND job_id IN ({ph})",
+        [user_id, *job_ids],
+    ).fetchall()
+    return {r["job_id"] for r in rows if r["job_id"] is not None}
+
+
 @router.get("/", response_model=JobsListResponse)
 def list_jobs(
+    user_id: int = Depends(require_user),
     q_: Annotated[str | None, Query(alias="q", description="Full-text search across title/company/description/location")] = None,
     country: Annotated[list[str] | None, Query(description="Country code (e.g. US). Repeatable.")] = None,
     ats: Annotated[list[str] | None, Query(description="ATS type (e.g. greenhouse). Repeatable.")] = None,
@@ -68,6 +82,8 @@ def list_jobs(
     updated_after: Annotated[str | None, Query(description="ISO 8601 UTC. Show jobs whose updated_at >= this. Use for 'rows touched by run X' drill-down.")] = None,
     updated_before: Annotated[str | None, Query(description="ISO 8601 UTC. Show jobs whose updated_at <= this.")] = None,
     scrape_run_id: Annotated[int | None, Query(description="Show only the URLs a given manual scrape run loaded. Joins scrape_run_url; immune to later UPSERTs on the same rows.")] = None,
+    include_expired: Annotated[bool, Query(description="When True, verified-expired jobs are also returned. Default hides them.")] = False,
+    only_expired: Annotated[bool, Query(description="Show ONLY verified-expired jobs (the 'No longer accepting applications' filter category).")] = False,
     sort: Annotated[str, Query(description="newest | oldest | salary_high | salary_low | relevance")] = "newest",
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -77,6 +93,7 @@ def list_jobs(
     sort_key = SORT_ALIASES.get(sort, "newest")
 
     cache_payload = {
+        "user_id": user_id,
         "q": q_,
         "country": sorted(country or []),
         "ats": sorted(ats or []),
@@ -94,6 +111,8 @@ def list_jobs(
         "updated_after": updated_after,
         "updated_before": updated_before,
         "scrape_run_id": scrape_run_id,
+        "include_expired": include_expired,
+        "only_expired": only_expired,
         "sort": sort_key,
         "page": page,
         "limit": limit,
@@ -125,6 +144,8 @@ def list_jobs(
         updated_after=updated_after,
         updated_before=updated_before,
         scrape_run_id=scrape_run_id,
+        include_expired=include_expired,
+        only_expired=only_expired,
     )
 
     offset = (page - 1) * limit
@@ -134,9 +155,11 @@ def list_jobs(
     with get_db() as conn:
         rows = conn.execute(sql, params).fetchall()
         total = conn.execute(count_sql, count_params).fetchone()[0]
-        saved_ids = _saved_ids_for(conn, [r["id"] for r in rows])
+        job_ids = [r["id"] for r in rows]
+        saved_ids = _saved_ids_for(conn, user_id, job_ids)
+        reported_ids = _reported_ids_for(conn, user_id, job_ids)
 
-    jobs = [q.row_to_summary(r, saved_ids) for r in rows]
+    jobs = [q.row_to_summary(r, saved_ids, reported_ids) for r in rows]
     result = JobsListResponse(
         jobs=[JobSummary(**j) for j in jobs],
         page=page,
@@ -313,12 +336,16 @@ def export_csv(
 
 
 @router.get("/{job_id}", response_model=JobDetail)
-def get_job(job_id: int) -> JobDetail:
+def get_job(
+    job_id: int,
+    user_id: int = Depends(require_user),
+) -> JobDetail:
     with get_db() as conn:
         row = conn.execute(
             f"SELECT {q.DETAIL_COLUMNS} FROM jobs j WHERE j.id = ?", (job_id,)
         ).fetchone()
         if not row:
             raise HTTPException(404, "job not found")
-        saved_ids = _saved_ids_for(conn, [job_id])
-    return JobDetail(**q.row_to_detail(row, saved_ids))
+        saved_ids = _saved_ids_for(conn, user_id, [job_id])
+        reported_ids = _reported_ids_for(conn, user_id, [job_id])
+    return JobDetail(**q.row_to_detail(row, saved_ids, reported_ids))
