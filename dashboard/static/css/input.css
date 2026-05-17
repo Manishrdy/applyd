@@ -1330,6 +1330,12 @@
   }
   .job-save.is-active { color: hsl(var(--accent)); }
 
+  /* Grid card: save + report share .job-save styling but must stay in the flex
+     row — the base .job-save rule is absolute for legacy single-button layout. */
+  .job-card .job-card-actions .job-save {
+    position: static;
+  }
+
   /* Age label — tabular tag */
   .job-age {
     font-size: 0.6875rem;

@@ -16,11 +16,25 @@
        class="card border-danger/40 bg-danger/10 text-danger px-4 py-3 text-sm" x-text="error"></div>
 
   <section class="card p-4 space-y-4">
-    <div class="flex items-center gap-3">
-      <span class="pill" :class="status.enabled ? 'border-warning/40 bg-warning/10 text-warning' : ''">
+    <div class="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+      <span class="pill w-fit" :class="status.enabled ? 'border-warning/40 bg-warning/10 text-warning' : ''">
         <span class="pill-dot" :style="status.enabled ? 'background:hsl(var(--warning))' : 'background:hsl(var(--success))'"></span>
         <span x-text="status.enabled ? 'Maintenance ON — non-admins blocked' : 'Maintenance OFF — service open'"></span>
       </span>
+      <div class="flex items-center gap-3 shrink-0">
+        <span id="maint-switch-label" class="text-sm font-medium text-text">Site-wide maintenance</span>
+        <button type="button"
+                role="switch"
+                aria-labelledby="maint-switch-label"
+                class="relative inline-flex h-7 w-11 shrink-0 cursor-pointer items-center rounded-full border px-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:cursor-not-allowed disabled:opacity-50"
+                :class="status.enabled ? 'border-warning/50 bg-warning/20' : 'border-border-base bg-surface-muted'"
+                :aria-checked="status.enabled === true"
+                :disabled="busy || loading"
+                @click="toggleMaintenance()">
+          <span class="pointer-events-none block h-5 w-5 rounded-full bg-bg shadow-sm ring-1 ring-border-base/60 transition-transform duration-200 ease-out"
+                :class="status.enabled ? 'translate-x-[1.125rem]' : 'translate-x-0'"></span>
+        </button>
+      </div>
     </div>
 
     <p class="text-sm text-text-muted">
@@ -36,18 +50,7 @@
       <p class="text-xs text-text-subtle">Editable only while maintenance is OFF, to keep the audit trail clean.</p>
     </div>
 
-    <div class="flex gap-2">
-      <button class="btn btn-warning" @click="enable()" x-show="!status.enabled" :disabled="busy">
-        <span x-show="!busy">Enable maintenance</span>
-        <span x-show="busy">Enabling…</span>
-      </button>
-      <button class="btn btn-secondary" @click="disable()" x-show="status.enabled" :disabled="busy">
-        <span x-show="!busy">Disable maintenance</span>
-        <span x-show="busy">Disabling…</span>
-      </button>
-    </div>
-
-    <dl class="mt-3 grid grid-cols-2 gap-2 text-xs text-text-subtle">
+    <dl class="mt-1 grid grid-cols-2 gap-2 text-xs text-text-subtle">
       <dt>Last toggled</dt>
       <dd class="tabular text-text" x-text="status.updated_at || '—'"></dd>
       <dt>Toggled by</dt>
@@ -67,6 +70,14 @@
       messageInput: "",
       status: { enabled: false, message: "", updated_at: null, enabled_by: null },
       async init() { await this.reload(); },
+      async toggleMaintenance() {
+        if (this.busy || this.loading) return;
+        if (this.status.enabled) {
+          await this.disable();
+        } else {
+          await this.enable();
+        }
+      },
       async reload() {
         this.loading = true;
         this.error = "";

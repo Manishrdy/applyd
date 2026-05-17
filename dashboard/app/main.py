@@ -116,7 +116,9 @@ async def logging_middleware(request: Request, call_next):
         raise
 
     elapsed_ms = (time.perf_counter() - started) * 1000
-    if hasattr(response, "body_iterator") and response.body_iterator is not None:
+    content_type = (response.headers.get("content-type") or "").lower()
+    is_event_stream = "text/event-stream" in content_type
+    if hasattr(response, "body_iterator") and response.body_iterator is not None and not is_event_stream:
         body = b""
         async for chunk in response.body_iterator:
             body += chunk

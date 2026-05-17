@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -139,6 +140,13 @@ class Settings(BaseSettings):
     # Per-user report rate limits.
     report_rate_limit_per_day: int = 20
     report_rate_limit_per_company_per_week: int = 5
+
+    @field_validator("verifier_sweep_batch_size", mode="before")
+    @classmethod
+    def _blank_sweep_batch_size_to_none(cls, value: object) -> object:
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        return value
 
 
 settings = Settings()

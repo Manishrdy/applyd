@@ -49,8 +49,7 @@ async def clear_failed_logins(
 ) -> dict:
     if not _csrf_valid(request, csrf_token):
         raise IdentityServiceError(400, "invalid request")
-    cleared = auth.admin_clear_failed_logins(email=email, ip_address=ip_address)
-    return {"cleared": cleared}
+    return auth.admin_clear_failed_logins(email=email, ip_address=ip_address)
 
 
 async def list_rate_limits(request: Request) -> dict:

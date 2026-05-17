@@ -1,14 +1,18 @@
 SHELL := /bin/zsh
 
-.PHONY: help setup setup-dashboard init ingest run run-dashboard dev test test-dashboard clean build-css watch-css
+.PHONY: help setup setup-dashboard init ingest run run-app run-stable run-dashboard dev test test-dashboard clean build-css watch-css
 
 help:
 	@echo "applyd root commands"
 	@echo "  make setup           - install dashboard dependencies"
 	@echo "  make init            - initialize dashboard DB"
 	@echo "  make ingest          - run one dashboard ingest cycle"
-	@echo "  make run-dashboard   - start dashboard-service on :8000"
+	@echo "  make run-dashboard   - start dashboard-service on :8000 (dev: --reload)"
 	@echo "  make run             - alias for make run-dashboard"
+	@echo "  make run-app         - alias for make run-dashboard"
+	@echo "  make run-stable      - start dashboard-service WITHOUT --reload (use for"
+	@echo "                         long verifier observation runs; --reload resets the"
+	@echo "                         APScheduler on every file save)"
 	@echo "  make build-css       - rebuild Tailwind CSS for dashboard"
 	@echo "  make watch-css       - rebuild CSS on template changes (Ctrl-C to stop)"
 	@echo "  make dev             - setup + init + ingest"
@@ -32,6 +36,14 @@ run:
 
 run-app:
 	cd dashboard && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# No --reload. Use this for long verifier observation runs (overnight,
+# multi-hour). --reload's file watcher restarts the worker on any .py save,
+# which resets APScheduler — every pending verifier tick is lost when that
+# happens. run-stable keeps a single worker alive so the scheduler ticks
+# undisturbed.
+run-stable:
+	cd dashboard && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 dev: setup init ingest
 

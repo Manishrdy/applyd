@@ -68,6 +68,30 @@ def test_stream_content_type_and_initial_event(admin_client, fast_stream):
     assert {"db", "ingestion", "scrape", "cache", "maintenance", "now"} <= snapshot.keys()
 
 
+def test_stream_first_chunk_is_not_buffered_by_middleware(admin_client, monkeypatch):
+    """Regression: middleware must not buffer SSE before logging response."""
+    monkeypatch.setattr(system_router, "STREAM_MAX_SECONDS", 1.0)
+    monkeypatch.setattr(system_router, "STREAM_DATA_INTERVAL_SECONDS", 0.4)
+    monkeypatch.setattr(system_router, "STREAM_HEARTBEAT_SECONDS", 0.05)
+    from app import main as main_app
+
+    seen: dict[str, float] = {"elapsed_ms": -1.0}
+    orig = main_app.log_http_response
+
+    def _capture(logger, request, response, elapsed_ms, payload):
+        if request.url.path == "/api/admin/stream/health":
+            seen["elapsed_ms"] = float(elapsed_ms)
+        return orig(logger, request, response, elapsed_ms, payload)
+
+    monkeypatch.setattr(main_app, "log_http_response", _capture)
+    with admin_client.stream("GET", "/api/admin/stream/health") as res:
+        assert res.status_code == 200
+        # Consume at least one chunk so the stream actually starts.
+        _ = next(res.iter_text())
+    assert seen["elapsed_ms"] >= 0
+    assert seen["elapsed_ms"] < 200, f"middleware likely buffered SSE (elapsed_ms={seen['elapsed_ms']:.2f})"
+
+
 def test_stream_emits_timeout_event_and_closes(admin_client, fast_stream):
     """With STREAM_MAX_SECONDS=1 the server should signal timeout and close."""
     with admin_client.stream("GET", "/api/admin/stream/health") as res:

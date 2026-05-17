@@ -320,6 +320,24 @@ CREATE TABLE IF NOT EXISTS verifier_circuit_breaker (
     PRIMARY KEY (ats_type, hour_bucket)
 );
 
+-- Verifier run tracking for real-time admin visibility and graceful cancel.
+CREATE TABLE IF NOT EXISTS verifier_runs (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind              TEXT NOT NULL,      -- periodic_sweep | suspected | manifest_drop | manual_sweep
+    status            TEXT NOT NULL,      -- running | cancel_requested | cancelled | completed | failed
+    started_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at       TEXT,
+    total_jobs        INTEGER NOT NULL DEFAULT 0,
+    checked_jobs      INTEGER NOT NULL DEFAULT 0,
+    active_count      INTEGER NOT NULL DEFAULT 0,
+    expired_count     INTEGER NOT NULL DEFAULT 0,
+    unknown_count     INTEGER NOT NULL DEFAULT 0,
+    error_count       INTEGER NOT NULL DEFAULT 0,
+    note              TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_verifier_runs_started ON verifier_runs(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_verifier_runs_status ON verifier_runs(status, started_at DESC);
+
 -- Per-user, per-day action rate limit. Reuses the same shape as
 -- auth_rate_limits but scoped to user-action keys (e.g. "report:<user_id>").
 CREATE TABLE IF NOT EXISTS user_action_rate_limits (
@@ -476,6 +494,29 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_jobs_verify_due ON jobs(last_verified_at) "
         "WHERE verification_status = 'active'"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS verifier_runs ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "kind TEXT NOT NULL, "
+        "status TEXT NOT NULL, "
+        "started_at TEXT NOT NULL DEFAULT (datetime('now')), "
+        "finished_at TEXT, "
+        "total_jobs INTEGER NOT NULL DEFAULT 0, "
+        "checked_jobs INTEGER NOT NULL DEFAULT 0, "
+        "active_count INTEGER NOT NULL DEFAULT 0, "
+        "expired_count INTEGER NOT NULL DEFAULT 0, "
+        "unknown_count INTEGER NOT NULL DEFAULT 0, "
+        "error_count INTEGER NOT NULL DEFAULT 0, "
+        "note TEXT)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_verifier_runs_started "
+        "ON verifier_runs(started_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_verifier_runs_status "
+        "ON verifier_runs(status, started_at DESC)"
     )
     conn.execute(
         "CREATE TABLE IF NOT EXISTS app_maintenance ("

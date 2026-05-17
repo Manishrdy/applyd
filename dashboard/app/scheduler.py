@@ -24,6 +24,9 @@ _ingest_lock: asyncio.Lock | None = None
 # expiration checks (and vice versa). SQLite WAL handles concurrent reads
 # + one writer; busy_timeout absorbs short contention.
 _verify_lock: asyncio.Lock | None = None
+_verify_task: asyncio.Task | None = None
+_verify_started_at: str | None = None
+_verify_kind: str | None = None
 
 
 def _get_verify_lock() -> asyncio.Lock:
@@ -31,6 +34,39 @@ def _get_verify_lock() -> asyncio.Lock:
     if _verify_lock is None:
         _verify_lock = asyncio.Lock()
     return _verify_lock
+
+
+def _set_verify_task(kind: str) -> None:
+    global _verify_task, _verify_started_at, _verify_kind
+    _verify_task = asyncio.current_task()
+    _verify_started_at = datetime.now(timezone.utc).isoformat()
+    _verify_kind = kind
+
+
+def _clear_verify_task() -> None:
+    global _verify_task, _verify_started_at, _verify_kind
+    _verify_task = None
+    _verify_started_at = None
+    _verify_kind = None
+
+
+def get_verify_state() -> dict:
+    """Runtime state for verifier work currently holding the verify lock."""
+    lock = _get_verify_lock()
+    return {
+        "running": bool(lock.locked()),
+        "kind": _verify_kind,
+        "started_at": _verify_started_at,
+    }
+
+
+def cancel_verify_task() -> bool:
+    """Best-effort cancel for the currently running verifier task."""
+    t = _verify_task
+    if t is None or t.done():
+        return False
+    t.cancel()
+    return True
 
 
 def _utc_day_bounds_iso(day: date) -> tuple[str, str]:
@@ -146,10 +182,16 @@ async def _run_verify_suspected() -> None:
         return
     try:
         async with lock:
+            _set_verify_task("suspected_tick")
             result = await verifier_svc.drain_suspected()
         log.info("suspected verifier tick: %s", result)
+    except asyncio.CancelledError:
+        log.info("suspected verifier tick cancelled")
+        raise
     except Exception:
         log.exception("suspected verifier tick failed")
+    finally:
+        _clear_verify_task()
 
 
 async def _run_verify_sweep() -> None:
@@ -160,10 +202,16 @@ async def _run_verify_sweep() -> None:
         return
     try:
         async with lock:
+            _set_verify_task("periodic_sweep")
             result = await verifier_svc.drain_periodic_sweep()
         log.info("periodic sweep tick: %s", result)
+    except asyncio.CancelledError:
+        log.info("periodic sweep tick cancelled")
+        raise
     except Exception:
         log.exception("periodic sweep tick failed")
+    finally:
+        _clear_verify_task()
 
 
 async def _run_if_stale() -> None:
@@ -255,6 +303,18 @@ def start_scheduler() -> AsyncIOScheduler:
         coalesce=True,
     )
     if settings.expired_detection_enabled:
+        # Kick verifier once at startup so an app restart doesn't wait for the
+        # first interval tick to begin processing the corpus.
+        _scheduler.add_job(
+            _run_verify_sweep,
+            id="startup_verify_sweep",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_verify_suspected,
+            id="startup_verify_suspected",
+            replace_existing=True,
+        )
         _scheduler.add_job(
             _run_verify_suspected,
             trigger=IntervalTrigger(minutes=settings.verifier_suspected_interval_minutes),
@@ -290,3 +350,4 @@ def stop_scheduler() -> None:
     if _scheduler is not None:
         _scheduler.shutdown(wait=False)
         _scheduler = None
+    _clear_verify_task()

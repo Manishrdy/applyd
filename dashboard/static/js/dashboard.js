@@ -52,6 +52,14 @@ const SENIORITY_OPTIONS = [
   { value: "principal", label: "Principal+" },
 ];
 
+/** Quick-pick labels for POST /api/jobs/{id}/report `reason` values. */
+const REPORT_REASON_OPTIONS = [
+  { value: "not_found",       label: "Posting not found or removed" },
+  { value: "position_filled", label: "Role filled / closed" },
+  { value: "link_broken",     label: "Apply link broken or errors" },
+  { value: "other",           label: "Something else…" },
+];
+
 const DEFAULT_FILTERS = () => ({
   q: "",
   country: ["US"],
@@ -103,11 +111,18 @@ function dashboard() {
 
     drawerOpen: false,
 
+    /* ---- report job (in-page panel, replaces window.prompt) ----- */
+    reportTargetJob: null,
+    reportShowOther: false,
+    reportOtherDetail: "",
+    reportPanelError: null,
+
     /* ---- constants exposed to template ------------------- */
     POSTED_OPTIONS,
     SORT_OPTIONS,
     ROLE_OPTIONS,
     SENIORITY_OPTIONS,
+    REPORT_REASON_OPTIONS,
 
     /* ---- lifecycle --------------------------------------- */
     async init() {
@@ -328,24 +343,57 @@ function dashboard() {
     },
 
     /* ---- broken-job report -------------------------------- */
-    async reportJob(job) {
-      // Two-tap pattern: first click shows a small inline prompt via
-      // the global flag; second click confirms. Keeps the card chrome
-      // tight without bringing in a modal library.
-      if (job._reporting) {
+    openReportPanel(job) {
+      if (!job || job._reporting || job.is_reported) return;
+      this.drawerOpen = false;
+      this.reportTargetJob = job;
+      this.reportShowOther = false;
+      this.reportOtherDetail = "";
+      this.reportPanelError = null;
+    },
+
+    closeReportPanel() {
+      this.reportTargetJob = null;
+      this.reportShowOther = false;
+      this.reportOtherDetail = "";
+      this.reportPanelError = null;
+    },
+
+    pickReportReason(reason) {
+      if (reason === "other") {
+        this.reportShowOther = true;
+        this.reportPanelError = null;
+        this.$nextTick(() => {
+          const el = this.$refs.reportOtherDetail;
+          if (el && typeof el.focus === "function") el.focus();
+        });
         return;
       }
-      const reason = window.prompt(
-        "Why is this job not loading? Options: not_found, position_filled, link_broken, other",
-        "not_found",
-      );
-      if (!reason) return;
+      this.submitJobReport(reason, null);
+    },
+
+    submitReportOther() {
+      const detail = (this.reportOtherDetail || "").trim();
+      if (!detail) {
+        this.reportPanelError = "Please add a short note.";
+        return;
+      }
+      this.submitJobReport("other", detail);
+    },
+
+    async submitJobReport(reason, detail) {
+      const job = this.reportTargetJob;
+      if (!job || job._reporting) return;
+
       job._reporting = true;
+      this.reportPanelError = null;
       try {
+        const body = { reason };
+        if (detail) body.detail = detail;
         const r = await fetch(`/api/jobs/${job.id}/report`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reason }),
+          body: JSON.stringify(body),
         });
         if (!r.ok) {
           const payload = await r.json().catch(() => ({}));
@@ -354,11 +402,12 @@ function dashboard() {
         const data = await r.json();
         job.verification_status = data.verification_status;
         job.is_reported = true;
+        this.closeReportPanel();
         window.dispatchEvent(new CustomEvent("applyd:job-reported", {
           detail: { job_id: job.id, status: data.verification_status },
         }));
       } catch (e) {
-        alert("Could not file report: " + (e.message || "unknown error"));
+        this.reportPanelError = e.message || "Could not file report";
       } finally {
         job._reporting = false;
       }

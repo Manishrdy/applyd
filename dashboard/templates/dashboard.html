@@ -192,6 +192,92 @@
     </div>
   </template>
 
+  {# ===== Report job — in-page sheet (replaces window.prompt) ===== #}
+  <template x-teleport="body">
+    <div x-show="reportTargetJob"
+         x-cloak
+         @keydown.escape.window="reportTargetJob && !reportTargetJob._reporting && closeReportPanel()"
+         class="fixed inset-0 z-[45] flex items-end justify-center sm:items-center sm:p-4"
+         role="dialog"
+         aria-modal="true"
+         aria-labelledby="report-dialog-title"
+         style="display: none;">
+      <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"
+           @click="reportTargetJob && !reportTargetJob._reporting && closeReportPanel()"></div>
+      <div class="relative flex w-full max-h-[88dvh] sm:max-h-[min(32rem,90dvh)] flex-col rounded-t-2xl border border-border-base bg-surface shadow-xl sm:max-w-md sm:rounded-xl"
+           @click.stop>
+        <header class="flex items-start justify-between gap-3 border-b border-border-base px-4 py-3 sm:px-5 sm:py-4">
+          <div class="min-w-0">
+            <h2 id="report-dialog-title" class="text-base font-semibold tracking-tight text-text">
+              Report this job
+            </h2>
+            <p class="mt-1 truncate text-xs text-text-muted"
+               x-text="reportTargetJob
+                 ? ((reportTargetJob.company || '—') + ' · ' + (reportTargetJob.title || 'Untitled'))
+                 : ''"></p>
+          </div>
+          <button type="button"
+                  class="btn btn-ghost btn-icon shrink-0"
+                  @click="closeReportPanel()"
+                  :disabled="!reportTargetJob || reportTargetJob._reporting"
+                  aria-label="Close">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </header>
+        <div class="min-h-0 space-y-3 overflow-y-auto px-4 py-3 sm:px-5 sm:py-4">
+          <p class="text-sm text-text-muted">What went wrong?</p>
+
+          <div x-show="!reportShowOther" class="flex flex-col gap-2">
+            <template x-for="opt in REPORT_REASON_OPTIONS" :key="opt.value">
+              <button type="button"
+                      class="btn btn-secondary justify-start px-3 py-2.5 text-left text-sm font-normal leading-snug whitespace-normal h-auto min-h-10"
+                      @click="pickReportReason(opt.value)"
+                      :disabled="reportTargetJob && reportTargetJob._reporting"
+                      x-text="opt.label"></button>
+            </template>
+            <p x-show="reportTargetJob && reportTargetJob._reporting"
+               class="flex items-center justify-center gap-2 pt-1 text-xs text-text-muted">
+              <svg class="h-3.5 w-3.5 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" stroke-linecap="round"/></svg>
+              Sending…
+            </p>
+          </div>
+
+          <div x-show="reportShowOther" class="space-y-2" x-cloak>
+            <button type="button"
+                    class="text-xs font-medium text-accent hover:underline disabled:pointer-events-none disabled:opacity-50"
+                    @click="reportShowOther = false; reportPanelError = null"
+                    :disabled="reportTargetJob && reportTargetJob._reporting">
+              ← Back to reasons
+            </button>
+            <textarea x-ref="reportOtherDetail"
+                      x-model="reportOtherDetail"
+                      class="input w-full min-h-[5.5rem] resize-y text-sm"
+                      maxlength="560"
+                      rows="4"
+                      placeholder="Briefly describe the issue…"
+                      :disabled="reportTargetJob && reportTargetJob._reporting"></textarea>
+            <p class="text-[11px] text-text-subtle">Please don&apos;t include email or phone numbers.</p>
+            <button type="button"
+                    class="btn btn-primary w-full"
+                    @click="submitReportOther()"
+                    :disabled="reportTargetJob && reportTargetJob._reporting">
+              <span x-show="!(reportTargetJob && reportTargetJob._reporting)">Submit report</span>
+              <span x-show="reportTargetJob && reportTargetJob._reporting"
+                    class="inline-flex items-center gap-2">
+                <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" stroke-linecap="round"/></svg>
+                Sending…
+              </span>
+            </button>
+          </div>
+
+          <p x-show="reportPanelError"
+             class="text-sm text-danger"
+             x-text="reportPanelError"></p>
+        </div>
+      </div>
+    </div>
+  </template>
+
   {# ===== Main results column ================================== #}
   <section class="min-w-0 space-y-5">
 
@@ -319,7 +405,7 @@
                 <div class="job-tile shrink-0"
                      x-text="(job.company || '?').charAt(0).toUpperCase()"
                      :title="job.company || 'Unknown'"></div>
-                <div class="min-w-0 flex-1 pr-8">
+                <div class="min-w-0 flex-1">
                   <div class="flex items-start gap-1.5">
                     <template x-if="isFresh(job)">
                       <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
@@ -339,10 +425,10 @@
                    above the stretched-link pseudo-element and intercept their
                    own clicks. Report sits to the LEFT of save so its hover
                    region doesn't push save off the corner. #}
-                <div class="flex items-center gap-1 shrink-0">
+                <div class="job-card-actions flex items-center gap-1 shrink-0">
                   <button type="button"
                           class="job-save text-text-subtle hover:text-danger"
-                          @click.stop.prevent="reportJob(job)"
+                          @click.stop.prevent="openReportPanel(job)"
                           :disabled="job._reporting || job.is_reported"
                           :title="job.is_reported ? 'Reported — thank you' : 'Report broken / expired'"
                           aria-label="Report broken job">
@@ -500,7 +586,7 @@
                 </button>
                 <button type="button"
                         class="job-report text-text-subtle hover:text-danger px-1.5 py-1 rounded-base"
-                        @click.stop.prevent="reportJob(job)"
+                        @click.stop.prevent="openReportPanel(job)"
                         :disabled="job._reporting || job.is_reported"
                         :title="job.is_reported ? 'Reported — thank you' : 'Report broken / expired'"
                         aria-label="Report broken job">

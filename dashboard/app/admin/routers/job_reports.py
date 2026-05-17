@@ -23,6 +23,7 @@ from app.admin import audit
 from app.admin.deps import AdminUser, require_admin_user
 from app.config import settings
 from app.database import get_db
+from app.services import verifier as verifier_svc
 
 log = logging.getLogger(__name__)
 
@@ -236,17 +237,17 @@ def _build_expirations_snapshot() -> dict:
         # Verifier activity windows.
         today_rows = conn.execute(
             "SELECT result, COUNT(*) AS n FROM job_verification_log "
-            "WHERE checked_at >= ? GROUP BY result",
+            "WHERE julianday(checked_at) >= julianday(?) GROUP BY result",
             (midnight_iso,),
         ).fetchall()
         hour_rows = conn.execute(
             "SELECT result, COUNT(*) AS n FROM job_verification_log "
-            "WHERE checked_at >= ? GROUP BY result",
+            "WHERE julianday(checked_at) >= julianday(?) GROUP BY result",
             (hour_ago_iso,),
         ).fetchall()
         day_rows = conn.execute(
             "SELECT result, COUNT(*) AS n FROM job_verification_log "
-            "WHERE checked_at >= ? GROUP BY result",
+            "WHERE julianday(checked_at) >= julianday(?) GROUP BY result",
             (day_ago_iso,),
         ).fetchall()
 
@@ -255,7 +256,7 @@ def _build_expirations_snapshot() -> dict:
             "SELECT j.ats_type, l.result, COUNT(*) AS n "
             "FROM job_verification_log l "
             "JOIN jobs j ON j.id = l.job_id "
-            "WHERE l.checked_at >= ? "
+            "WHERE julianday(l.checked_at) >= julianday(?) "
             "GROUP BY j.ats_type, l.result "
             "ORDER BY n DESC LIMIT 200",
             (midnight_iso,),
@@ -273,7 +274,7 @@ def _build_expirations_snapshot() -> dict:
         # Per-detector breakdown today.
         per_detector_rows = conn.execute(
             "SELECT detector, result, COUNT(*) AS n FROM job_verification_log "
-            "WHERE checked_at >= ? "
+            "WHERE julianday(checked_at) >= julianday(?) "
             "GROUP BY detector, result "
             "ORDER BY n DESC LIMIT 100",
             (midnight_iso,),
@@ -325,6 +326,7 @@ def _build_expirations_snapshot() -> dict:
         "est_jobs_per_tick": per_tick,
         "est_ticks_per_full_pass": ticks_per_window,
     }
+    sweep_state = verifier_svc.get_run_state()
 
     return {
         "counts": counts,
@@ -335,6 +337,7 @@ def _build_expirations_snapshot() -> dict:
         "per_detector": per_detector,
         "last_tick": dict(last_tick_row) if last_tick_row else None,
         "schedule": schedule,
+        "sweep_state": sweep_state,
         "breakers": [dict(r) for r in breaker_rows],
         "recent": [dict(r) for r in recent_rows],
     }
@@ -368,6 +371,8 @@ async def _expirations_event_stream(request: Request):
     lifetime so an idle browser eventually rotates the cookie."""
     start = time.monotonic()
     next_data_at = start
+    sent_events = 0
+    log.info("expirations SSE stream opened")
     try:
         yield _sse_frame("hello", {"interval_seconds": EXPIRATIONS_STREAM_INTERVAL_SECONDS})
         while True:
@@ -384,6 +389,7 @@ async def _expirations_event_stream(request: Request):
                     log.exception("expirations snapshot failed; skipping tick")
                 else:
                     yield _sse_frame(None, snapshot)
+                    sent_events += 1
                 next_data_at = now + EXPIRATIONS_STREAM_INTERVAL_SECONDS
             else:
                 yield ": heartbeat\n\n"
@@ -392,7 +398,10 @@ async def _expirations_event_stream(request: Request):
                 max(0.05, next_data_at - time.monotonic()),
             ))
     except asyncio.CancelledError:
+        log.info("expirations SSE stream cancelled (events_sent=%d)", sent_events)
         raise
+    finally:
+        log.info("expirations SSE stream closed (events_sent=%d)", sent_events)
 
 
 @router.get("/stream/expirations")
@@ -693,8 +702,12 @@ async def admin_run_sweep_now(
 ):
     """Manually kick a verifier sweep right now. Useful when --reload has
     been resetting the scheduler and you want immediate proof of life."""
-    from app.services import verifier as verifier_svc
-
+    state = verifier_svc.get_run_state()
+    if state.get("running"):
+        raise HTTPException(
+            409,
+            "A verifier job is already running. Stop it first, then run a new sweep.",
+        )
     bs = batch_size if batch_size and batch_size > 0 else None
     result = await verifier_svc.drain_periodic_sweep(batch_size=bs)
     audit.record(
@@ -705,6 +718,33 @@ async def admin_run_sweep_now(
         request=request,
     )
     return {"ok": True, "result": result}
+
+
+@router.get("/expirations/sweep-state")
+def admin_sweep_state(
+    request: Request,
+    admin: AdminUser = Depends(require_admin_user),
+):
+    return {"ok": True, "state": verifier_svc.get_run_state()}
+
+
+@router.post("/expirations/stop-sweep")
+def admin_stop_sweep(
+    request: Request,
+    csrf_token: Annotated[str, Form()] = "",
+    admin: AdminUser = Depends(require_admin_user),
+):
+    before = verifier_svc.get_run_state()
+    cancelled = verifier_svc.request_cancel_active_run()
+    after = verifier_svc.get_run_state()
+    audit.record(
+        admin=admin,
+        action="stop_verifier_sweep",
+        target="manual",
+        detail={"cancel_requested": cancelled, "before": before, "after": after},
+        request=request,
+    )
+    return {"ok": True, "cancel_requested": cancelled, "state": after}
 
 
 @router.post("/verifier/circuit-breaker/{ats_type}/clear")

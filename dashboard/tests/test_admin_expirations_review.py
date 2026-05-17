@@ -55,7 +55,7 @@ def test_summary_returns_complete_payload(admin_client, lifecycle_seed):
     body = r.json()
     for key in ("counts", "today", "last_hour", "last_24h",
                 "per_ats", "per_detector", "schedule", "breakers",
-                "recent", "last_tick"):
+                "recent", "last_tick", "sweep_state"):
         assert key in body, f"missing key: {key}"
     assert body["counts"].get("expired", 0) >= 1
 
@@ -324,3 +324,36 @@ def test_run_sweep_returns_result_dict(admin_client, test_db_path):
     body = r.json()
     assert body["ok"] is True
     assert "result" in body
+
+
+def test_run_sweep_rejected_when_another_run_is_active(admin_client, test_db_path):
+    with get_db(test_db_path) as conn:
+        conn.execute(
+            "INSERT INTO verifier_runs (kind, status, total_jobs, checked_jobs) "
+            "VALUES ('periodic_sweep', 'running', 100, 12)"
+        )
+    r = admin_client.post(
+        "/api/admin/expirations/run-sweep",
+        data={"csrf_token": "test-csrf"},
+    )
+    assert r.status_code == 409
+
+
+def test_stop_sweep_sets_cancel_requested(admin_client, test_db_path):
+    with get_db(test_db_path) as conn:
+        conn.execute(
+            "INSERT INTO verifier_runs (kind, status, total_jobs, checked_jobs) "
+            "VALUES ('periodic_sweep', 'running', 100, 12)"
+        )
+    r = admin_client.post(
+        "/api/admin/expirations/stop-sweep",
+        data={"csrf_token": "test-csrf"},
+    )
+    assert r.status_code == 200
+    assert r.json()["cancel_requested"] is True
+    with get_db(test_db_path) as conn:
+        row = conn.execute(
+            "SELECT status FROM verifier_runs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    assert row is not None
+    assert str(row["status"]) == "cancel_requested"

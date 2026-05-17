@@ -38,7 +38,7 @@ class _StubIdentity:
 
     async def clear_failed_logins(self, request, csrf_token, *, email=None, ip_address=None):
         self.calls.append(("clear_failed_logins", csrf_token, email, ip_address))
-        return {"cleared": 1}
+        return {"cleared": 1, "events_deleted": 2}
 
     async def list_rate_limits(self, request):
         self.calls.append(("list_rate_limits",))

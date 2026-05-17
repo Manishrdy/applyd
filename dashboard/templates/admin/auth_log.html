@@ -18,22 +18,34 @@
   <section class="card p-4 space-y-3">
     <h2 class="text-sm font-medium">Clear rate-limit lockouts</h2>
     <p class="text-xs text-text-subtle">
-      Scoped clear deletes only the matching buckets. Broad clear (both fields blank)
-      preserves bucket history and only nulls <code>locked_until</code>.
+      Confirming also removes matching rows from the failed-login table below.
+      Scoped clear deletes matching rate-limit buckets and matching failed events.
+      Broad clear (both fields blank) unlocks everyone by nulling <code>locked_until</code>,
+      preserves bucket counters, and clears every row from this log.
     </p>
     <div class="grid gap-3 sm:grid-cols-3 items-end">
       <div class="space-y-1.5">
         <label class="text-sm font-medium">Email (optional)</label>
-        <input class="input" x-model="clearEmail" placeholder="someone@example.com">
+        <input class="input" x-model="clearEmail" placeholder="someone@example.com" :disabled="busy">
       </div>
       <div class="space-y-1.5">
         <label class="text-sm font-medium">IP address (optional)</label>
-        <input class="input" x-model="clearIp" placeholder="203.0.113.4">
+        <input class="input" x-model="clearIp" placeholder="203.0.113.4" :disabled="busy">
       </div>
-      <button class="btn btn-primary" @click="doClear()" :disabled="busy">
-        <span x-show="!busy">Clear</span>
-        <span x-show="busy">Clearing…</span>
+      <button type="button" class="btn btn-primary" @click="openClearConfirm()" :disabled="busy">
+        Clear
       </button>
+    </div>
+    <div x-show="showClearConfirm" x-cloak
+         class="rounded-base border border-border-base bg-surface-muted/50 p-3 space-y-3 text-sm">
+      <p class="text-text-muted" x-text="clearSummary"></p>
+      <div class="flex flex-wrap justify-end gap-2">
+        <button type="button" class="btn btn-ghost btn-sm" @click="cancelClearConfirm()" :disabled="busy">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" @click="executeClear()" :disabled="busy">
+          <span x-show="!busy">Confirm clear</span>
+          <span x-show="busy">Clearing…</span>
+        </button>
+      </div>
     </div>
   </section>
 
@@ -77,6 +89,8 @@
       events: [],
       clearEmail: "",
       clearIp: "",
+      showClearConfirm: false,
+      clearSummary: "",
       async init() { await this.reload(); },
       async reload() {
         this.loading = true;
@@ -89,19 +103,47 @@
           this.loading = false;
         }
       },
-      async doClear() {
-        const scoped = this.clearEmail || this.clearIp;
-        const label = scoped ? "scoped clear" : "broad clear (unlock everyone)";
-        if (!confirm("Confirm " + label + "?")) return;
+      openClearConfirm() {
+        const em = (this.clearEmail || "").trim();
+        const ip = (this.clearIp || "").trim();
+        if (em && ip) {
+          this.clearSummary =
+            "Scoped clear for email " + em + " or IP " + ip +
+            ": delete matching rate-limit buckets, unlock as needed, and remove matching failed-login rows from this log.";
+        } else if (em) {
+          this.clearSummary =
+            "Scoped clear for email " + em +
+            ": delete matching rate-limit buckets and matching failed-login rows.";
+        } else if (ip) {
+          this.clearSummary =
+            "Scoped clear for IP " + ip +
+            ": delete matching rate-limit buckets and matching failed-login rows.";
+        } else {
+          this.clearSummary =
+            "Broad clear: unlock all active lockouts (bucket counters stay) and remove every failed-login row from this log.";
+        }
+        this.showClearConfirm = true;
+      },
+      cancelClearConfirm() {
+        if (this.busy) return;
+        this.showClearConfirm = false;
+      },
+      async executeClear() {
         this.busy = true;
         try {
           const res = await window.adminApi.post("/api/admin/failed-logins/clear", {
             email: this.clearEmail || null,
             ip_address: this.clearIp || null,
           });
-          window.adminToast("Cleared " + (res?.cleared ?? 0) + " bucket(s)", "success");
+          const b = res?.cleared ?? 0;
+          const ev = res?.events_deleted ?? 0;
+          window.adminToast(
+            "Updated " + b + " lockout row(s), removed " + ev + " event(s) from log",
+            "success"
+          );
           this.clearEmail = "";
           this.clearIp = "";
+          this.showClearConfirm = false;
           await this.reload();
         } catch (e) {
           window.adminToast(e.message || "Clear failed", "error");

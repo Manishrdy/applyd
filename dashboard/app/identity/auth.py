@@ -601,11 +601,13 @@ def admin_list_failed_logins(limit: int = 100) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def admin_clear_failed_logins(*, email: str | None = None, ip_address: str | None = None) -> int:
-    """Clear matching rate-limit buckets. Returns rows deleted.
+def admin_clear_failed_logins(
+    *, email: str | None = None, ip_address: str | None = None
+) -> dict[str, int]:
+    """Clear matching rate-limit buckets and failed rows in auth_events.
 
-    Scoped to either email, ip, or — if both None — all signin/signup buckets.
-    Conservative: we never clear unrelated buckets accidentally.
+    Scoped to either email, ip, or — if both None — broad unlock plus all
+    failed events. Rate-limit clears are conservative (same as before).
     """
     patterns: list[str] = []
     if email:
@@ -617,7 +619,10 @@ def admin_clear_failed_logins(*, email: str | None = None, ip_address: str | Non
         patterns.append(f"pair::{normalized_ip}::%")
         patterns.append(f"ip::{normalized_ip}")
         patterns.append(f"signup_ip::{normalized_ip}")
-    deleted = 0
+    norm_email = (email or "").strip().lower() or None
+    norm_ip = (ip_address or "").strip().lower() or None
+    buckets_cleared = 0
+    events_deleted = 0
     with get_db() as conn:
         if not patterns:
             # Caller asked for a broad clear — only clear lockouts, not the
@@ -626,15 +631,42 @@ def admin_clear_failed_logins(*, email: str | None = None, ip_address: str | Non
                 "UPDATE auth_rate_limits SET locked_until = NULL "
                 "WHERE locked_until IS NOT NULL"
             )
-            deleted = int(cur.rowcount or 0)
+            buckets_cleared = int(cur.rowcount or 0)
         else:
             for pat in patterns:
                 cur = conn.execute(
                     "DELETE FROM auth_rate_limits WHERE bucket_key LIKE ?",
                     (pat,),
                 )
-                deleted += int(cur.rowcount or 0)
-    return deleted
+                buckets_cleared += int(cur.rowcount or 0)
+
+        if not norm_email and not norm_ip:
+            cur = conn.execute("DELETE FROM auth_events WHERE success = 0")
+            events_deleted = int(cur.rowcount or 0)
+        elif norm_email and norm_ip:
+            cur = conn.execute(
+                "DELETE FROM auth_events WHERE success = 0 AND ("
+                "(email IS NOT NULL AND lower(trim(email)) = ?) OR "
+                "(ip_address IS NOT NULL AND lower(trim(ip_address)) = ?))",
+                (norm_email, norm_ip),
+            )
+            events_deleted = int(cur.rowcount or 0)
+        elif norm_email:
+            cur = conn.execute(
+                "DELETE FROM auth_events WHERE success = 0 AND email IS NOT NULL "
+                "AND lower(trim(email)) = ?",
+                (norm_email,),
+            )
+            events_deleted = int(cur.rowcount or 0)
+        else:
+            cur = conn.execute(
+                "DELETE FROM auth_events WHERE success = 0 AND ip_address IS NOT NULL "
+                "AND lower(trim(ip_address)) = ?",
+                (norm_ip,),
+            )
+            events_deleted = int(cur.rowcount or 0)
+
+    return {"cleared": buckets_cleared, "events_deleted": events_deleted}
 
 
 def admin_list_locked_buckets() -> list[dict]:
